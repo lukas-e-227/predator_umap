@@ -1,0 +1,1 @@
+{"api_version": 7, "can_window": false, "window_range": [2, 60], "output_step": 0.1, "start_view": null, "allow_delete": false, "sets": [{"id": 0, "window": null, "original": true, "status": "done", "points": 26984, "columns": 18, "same_run": null, "seconds": null, "error": null}], "static": true}

@@ -1,8 +1,12 @@
 // Static copy of the UMAP explorer: answers the page's requests from the files that
 // build_static.py exported, instead of from the Python server.
 //
-// GET api/<path> reads docs/api/<path>.json. Loading a saved view reads the answer the
-// server gave for it. Watershed clusters are computed here, in the browser, by the
+// The site holds several datasets, each exported to docs/api/<dataset>/. The page's
+// URL picks one, as index.html?data=<dataset>; without it the first is shown.
+// docs/api/datasets.json lists them.
+//
+// GET api/<path> reads docs/api/<dataset>/<path>.json. Loading a saved view reads the
+// answer the server gave for it. Watershed clusters are computed here, in the browser, by the
 // same steps as UmapExplorer.clusters in umap_explorer.py. Anything that needs UMAP,
 // such as a new layout or a new time window, gets an error.
 (() => {
@@ -12,17 +16,41 @@
     status, headers: { 'Content-Type': 'application/json' },
   });
 
+  // the datasets, and the one this page shows
+  let index = null;
+  async function dataset() {
+    if (!index) {
+      index = realFetch('api/datasets.json').then(r => r.json()).then(list => {
+        const asked = new URLSearchParams(window.location.search).get('data');
+        const key = list.datasets.some(d => d.key === asked) ? asked : list.datasets[0].key;
+        return { list: list.datasets, key };
+      });
+    }
+    return index;
+  }
+  // a file of the shown dataset; api/sets/0 becomes api/<dataset>/sets/0
+  const fileOf = async path => `api/${(await dataset()).key}/${path.slice(4)}`;
+
   window.fetch = async (input, opts = {}) => {
     const url = typeof input === 'string' ? input : input.url;
     if (!url.startsWith('api/')) return realFetch(input, opts);
     const path = url.split('?')[0];
     const method = (opts.method || 'GET').toUpperCase();
     if (method === 'GET') {
-      if (path === 'api/points') return realFetch('api/sets/0/points.json');
-      return realFetch(`${path}.json`);
+      if (path === 'api/points') return realFetch(await fileOf('api/sets/0/points.json'));
+      if (path === 'api/sets') {
+        // the point sets, and the datasets for the page's dataset menu
+        const r = await realFetch(await fileOf('api/sets.json'));
+        if (!r.ok) return r;
+        const { list, key } = await dataset();
+        return reply(Object.assign(await r.json(), { datasets: list, dataset: key }));
+      }
+      return realFetch(await fileOf(`${path}.json`));
     }
     const body = opts.body ? JSON.parse(opts.body) : {};
-    if (path === 'api/saves/load') return realFetch(`api/saves/load/${encodeURIComponent(body.file)}`);
+    if (path === 'api/saves/load') {
+      return realFetch(await fileOf(`api/saves/load/${encodeURIComponent(body.file)}`));
+    }
     const m = path.match(/^api\/sets\/(\d+)\/layouts\/(\d+)\/clusters$/);
     if (m) {
       try {
@@ -277,7 +305,7 @@
     const key = `${setId}:${layoutId}`;
     let sweep = sweeps.get(key);
     if (!sweep) {
-      const r = await realFetch(`api/sets/${setId}/layouts/${layoutId}.json`);
+      const r = await realFetch(await fileOf(`api/sets/${setId}/layouts/${layoutId}.json`));
       if (!r.ok) throw new Error(`no layout ${layoutId} in point set ${setId}`);
       const L = await r.json();
       const x = decodeF32(L.x), y = decodeF32(L.y), placed = [];

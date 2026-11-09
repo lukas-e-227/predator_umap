@@ -92,6 +92,8 @@
   .secondary { color: var(--ink-2); }
 
   header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-bottom: 12px; }
+  header .dataset { margin-left: auto; display: flex; align-items: baseline; gap: 6px; }
+  header .dataset select { max-width: min(420px, 70vw); }
 
   .filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 12px; }
   label.field { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); }
@@ -217,6 +219,7 @@
 <header>
   <h1 id="title">UMAP explorer</h1>
   <span class="muted" id="subtitle">loading the embedding …</span>
+  <label class="dataset" id="datasetField" hidden>Dataset <select id="datasetSel"></select></label>
 </header>
 
 <div class="banner" id="banner" hidden role="alert"><strong>Error.</strong> <span id="bannerText"></span></div>
@@ -518,9 +521,9 @@ async function loadPoints() {
     // no Python behind this page: only what was exported can be shown
     $('staticNote').hidden = false;
     $('saveName').closest('.row').hidden = true;
-    $('windowRow').hidden = true;
-    $('windowOff').hidden = true;
+    $('setPanel').hidden = true;     // one point set per dataset, and no new ones
     $('layoutPanel').querySelector('details').hidden = true;
+    setupDatasets();
   }
   await loadSet(0);
   if (S.setsInfo.api_version >= 6) {
@@ -535,6 +538,21 @@ async function loadPoints() {
       await loadView().catch(err => saveStatus(err.message, true));
     }
   }
+}
+
+function setupDatasets() {
+  // the static site's datasets: choosing one reloads the page on it
+  const list = S.setsInfo.datasets || [];
+  if (list.length < 2) return;
+  const sel = $('datasetSel');
+  sel.replaceChildren(...list.map(d => new Option(d.label, d.key)));
+  sel.value = S.setsInfo.dataset;
+  sel.onchange = () => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('data', sel.value);
+    window.location.assign(url);
+  };
+  $('datasetField').hidden = false;
 }
 
 async function loadSet(setId) {

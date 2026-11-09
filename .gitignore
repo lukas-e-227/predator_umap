@@ -2,5 +2,5 @@ __pycache__/
 *.pyc
 # build inputs: large, and not needed by the site
 data/
-bundle.pkl
+bundle_*.pkl
 env/
