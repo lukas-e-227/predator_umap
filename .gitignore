@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+# build inputs: large, and not needed by the site
+data/
+bundle.pkl
+env/

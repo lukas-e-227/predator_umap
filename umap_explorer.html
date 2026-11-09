@@ -1,0 +1,2106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UMAP explorer</title>
+<!-- on the static site, answers the page's requests from exported files; the Python
+     server has no such file, so there it does nothing -->
+<script src="static.js"></script>
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f9f9f7;
+    --surface: #fcfcfb;
+    --ink: #0b0b0b;
+    --ink-2: #52514e;
+    --muted: #898781;
+    --grid: #e1e0d9;
+    --axis: #c3c2b7;
+    --border: rgba(11, 11, 11, 0.10);
+    --wash: rgba(11, 11, 11, 0.05);
+    --cat-1: #2a78d6;
+    --cat-2: #eb6834;
+    --cat-3: #1baf7a;
+    --cat-4: #eda100;
+    --cat-5: #e87ba4;
+    --cat-6: #008300;
+    --cat-7: #6250d6;
+    --cat-8: #e34948;
+    --prey: #2a78d6;
+    --flee: #eb6834;
+    --error: #d03b3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --page: #0d0d0d;
+      --surface: #1a1a19;
+      --ink: #f0efec;
+      --ink-2: #c3c2b7;
+      --muted: #898781;
+      --grid: #2c2c2a;
+      --axis: #383835;
+      --border: rgba(255, 255, 255, 0.10);
+      --wash: rgba(255, 255, 255, 0.06);
+      --cat-1: #3987e5;
+      --cat-2: #d95926;
+      --cat-3: #199e70;
+      --cat-4: #c98500;
+      --cat-5: #d55181;
+      --cat-6: #008300;
+      --cat-7: #9085e9;
+      --cat-8: #e66767;
+      --prey: #3987e5;
+      --flee: #d95926;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --ink: #f0efec;
+    --ink-2: #c3c2b7;
+    --muted: #898781;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --border: rgba(255, 255, 255, 0.10);
+    --wash: rgba(255, 255, 255, 0.06);
+    --cat-1: #3987e5;
+    --cat-2: #d95926;
+    --cat-3: #199e70;
+    --cat-4: #c98500;
+    --cat-5: #d55181;
+    --cat-6: #008300;
+    --cat-7: #9085e9;
+    --cat-8: #e66767;
+    --prey: #3987e5;
+    --flee: #d95926;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--page); color: var(--ink); }
+  body {
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+    padding-inline: 16px;
+    padding-block: 16px 32px;
+  }
+  [hidden] { display: none !important; }
+  h1 { font-size: 18px; font-weight: 600; margin: 0; }
+  h2 { font-size: 14px; font-weight: 600; margin: 0; }
+  .muted { color: var(--muted); }
+  .secondary { color: var(--ink-2); }
+
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-bottom: 12px; }
+
+  .filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 12px; }
+  label.field { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); }
+  select, input[type="number"], input[type="text"], button {
+    font: inherit; color: var(--ink); background: var(--surface);
+    border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px;
+  }
+  input[type="number"] { width: 4.5em; }
+  button { cursor: pointer; }
+  button:hover { background: var(--wash); }
+  button:disabled { opacity: 0.45; cursor: default; }
+  button.primary { min-width: 5.5em; font-weight: 600; }
+
+  /* one column on a phone; two with the controls across the top; three with the
+     controls in a sidebar once there is room, so everything fits one screen */
+  main { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); align-items: start; }
+  @media (min-width: 1000px) {
+    main { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); }
+    .side { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 12px 28px; }
+    .side > * { flex: 1 1 260px; }
+  }
+  @media (min-width: 1400px) {
+    main { grid-template-columns: 300px minmax(0, 1.1fr) minmax(0, 1fr); }
+    .side {
+      grid-column: auto; display: block; position: sticky; top: 16px;
+      max-height: calc(100vh - 32px); overflow-y: auto;
+    }
+  }
+  .side-sec { display: grid; gap: 8px; padding-bottom: 12px; margin-bottom: 12px; border-bottom: 1px solid var(--grid); }
+  .side-sec h2 { margin-bottom: 2px; }
+  .side label.field { display: grid; grid-template-columns: 7.2em minmax(0, 1fr); align-items: center; gap: 8px; }
+  .side label.field.check { display: flex; align-items: flex-start; gap: 6px; color: var(--ink); }
+  .side label.field.check input { margin: 3px 0 0; accent-color: var(--ink-2); }
+  .side label.field.wide { grid-template-columns: minmax(0, 1fr); gap: 3px; }
+  .side label.field.indent { padding-left: 20px; grid-template-columns: auto minmax(0, 1fr); }
+  .side select { width: 100%; }
+  .side .row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .side details { display: grid; gap: 8px; }
+  .side details[open] > * + * { margin-top: 8px; }
+  .side .row input[type="text"] { flex: 1; min-width: 0; }
+  #saveStatus.bad { color: var(--error); }
+  .slider-row { display: flex; align-items: center; gap: 8px; }
+  .small { font-size: 13px; }
+  .help { margin: 0; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px; min-width: 0;
+  }
+  .card-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; margin-bottom: 8px; }
+
+  .plot { position: relative; width: 100%; }
+  .plot canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  #umapWrap { aspect-ratio: 1 / 1; max-height: calc(100vh - 150px); min-height: 280px; touch-action: none; cursor: crosshair; }
+  #arenaWrap { aspect-ratio: 4 / 3; max-height: calc(100vh - 470px); min-height: 220px; }
+  #timelineWrap { height: 86px; margin-top: 8px; cursor: pointer; touch-action: none; }
+
+  .empty {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    text-align: center; padding: 24px; color: var(--muted);
+  }
+  .tooltip {
+    position: absolute; pointer-events: none; z-index: 2;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12); padding: 6px 10px; min-width: 150px;
+    font-size: 13px;
+  }
+  .tooltip .value { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .tooltip .row { display: flex; align-items: center; gap: 6px; color: var(--ink-2); }
+  .key-line { display: inline-block; width: 12px; height: 2px; border-radius: 1px; flex: none; }
+
+  .legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; margin-top: 8px; color: var(--ink-2); font-size: 13px; }
+  .legend .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+  .legend canvas { width: 180px; height: 10px; border-radius: 3px; display: block; }
+  .scale { display: inline-flex; flex-direction: column; gap: 2px; }
+  .scale-ticks { display: flex; justify-content: space-between; width: 180px; font-variant-numeric: tabular-nums; font-size: 12px; color: var(--muted); }
+
+  .arena-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; font-size: 13px; color: var(--ink-2); }
+  .arena-legend svg { vertical-align: -2px; margin-right: 5px; }
+
+  .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 10px; }
+  .controls .group { display: inline-flex; gap: 4px; }
+  input[type="range"] { width: 100%; margin: 10px 0 0; accent-color: var(--ink-2); }
+  .status { margin-top: 6px; font-variant-numeric: tabular-nums; color: var(--ink-2); }
+
+  table.values { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
+  table.values caption { text-align: left; color: var(--muted); padding-bottom: 4px; }
+  table.values td { padding: 2px 0; border-bottom: 1px solid var(--grid); }
+  table.values td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .values-wrap { columns: 2 220px; column-gap: 24px; }
+
+  .layout { display: grid; gap: 6px; margin-bottom: 10px; }
+  .layout-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+  .layout summary { cursor: pointer; color: var(--ink-2); width: fit-content; }
+  .metrics { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+  .metrics label {
+    display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+    border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px 2px 6px;
+    font-size: 13px; color: var(--ink-2);
+  }
+  .metrics label:has(input:checked) { background: var(--wash); color: var(--ink); }
+  .metrics label.dead { opacity: 0.5; }
+  .metrics .w { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .metrics input { margin: 0; accent-color: var(--ink-2); }
+  #layoutSel { max-width: 100%; }
+  #layoutStatus.bad, #setStatus.bad, #clusterStatus.bad { color: var(--error); }
+  #clusterK { width: 5em; }
+  #winSlider { flex: 1; min-width: 0; margin: 0; }
+  #winLabel { font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--ink); }
+
+  .banner {
+    margin-bottom: 12px; padding: 8px 12px; border-radius: 8px;
+    border: 1px solid var(--error); color: var(--ink);
+  }
+  .banner strong { color: var(--error); }
+  kbd {
+    font: 12px ui-monospace, monospace; border: 1px solid var(--border);
+    border-bottom-width: 2px; border-radius: 4px; padding: 0 4px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1 id="title">UMAP explorer</h1>
+  <span class="muted" id="subtitle">loading the embedding …</span>
+</header>
+
+<div class="banner" id="banner" hidden role="alert"><strong>Error.</strong> <span id="bannerText"></span></div>
+
+<main>
+  <aside class="card side" aria-label="Controls">
+    <section class="side-sec">
+      <h2>View</h2>
+      <label class="field">Color by <select id="colorBy"></select></label>
+      <label class="field">Attack direction <select id="dirFilter"><option value="-1">all</option></select></label>
+      <div><button id="clearSel" disabled>Clear selection</button></div>
+    </section>
+
+    <section class="side-sec" id="savePanel" hidden>
+      <h2>Saved views</h2>
+      <div class="row">
+        <input type="text" id="saveName" placeholder="Name for this view" aria-label="Name for this view" maxlength="120">
+        <button id="saveBtn">Save</button>
+      </div>
+      <label class="field wide">Saved views <select id="saveSel" aria-label="Saved views"></select></label>
+      <div class="row">
+        <button id="loadBtn" disabled>Load</button>
+        <button id="deleteBtn" disabled>Delete</button>
+      </div>
+      <div class="muted small" id="saveStatus" role="status"></div>
+    </section>
+
+    <section class="side-sec" id="setPanel" hidden>
+      <h2>Points</h2>
+      <label class="field wide">Point set <select id="setSel" aria-label="Point set"></select></label>
+      <div id="windowRow">
+        <label class="field wide">Time per point
+          <span class="slider-row">
+            <input type="range" id="winSlider" min="2" max="60" step="1" value="15" aria-label="Window length in iterations">
+            <span id="winLabel"></span>
+          </span>
+        </label>
+        <div class="row"><button id="setRun" class="primary">Compute points</button></div>
+        <div class="muted small" id="setStatus" role="status"></div>
+      </div>
+      <div class="muted small" id="windowOff" hidden>Start the explorer with feature_fn=controller_school_features to choose a time window here.</div>
+      <div class="muted small" id="setNote"></div>
+    </section>
+
+    <section class="side-sec" id="layoutPanel" hidden>
+      <h2>Layout</h2>
+      <label class="field wide">Layout <select id="layoutSel" aria-label="Layout"></select></label>
+      <div class="row"><button id="layoutFlip" disabled title="Shortcut: L">Flip to previous</button></div>
+      <div class="muted small" id="layoutNote"></div>
+      <details open>
+        <summary>New layout <span class="muted" id="metricsCount"></span></summary>
+        <label class="field">Points <select id="layoutDirs"><option value="">all attack directions</option></select></label>
+        <label class="field check"><input type="checkbox" id="exclOn"> Exclude neighbours from the point's own run</label>
+        <label class="field indent" id="exclGapField">that are closer than
+          <select id="exclGap" disabled>
+            <option value="2">2 s</option>
+            <option value="5" selected>5 s</option>
+            <option value="10">10 s</option>
+            <option value="run">any time: other runs only</option>
+          </select>
+        </label>
+        <div class="metrics" id="metrics" role="group" aria-label="Metrics used for the layout"></div>
+        <div class="row">
+          <button id="metricsAll">All</button>
+          <button id="metricsNone">None</button>
+          <button id="layoutRun" class="primary">Compute layout</button>
+        </div>
+        <div class="muted small" id="layoutStatus" role="status"></div>
+      </details>
+    </section>
+
+    <section class="side-sec" id="clusterPanel" hidden>
+      <h2>Clusters</h2>
+      <p class="muted small help">Splits the layout at the valleys of its point density. Leave Regions empty to pick the count automatically.</p>
+      <label class="field">Regions <input type="number" id="clusterK" min="2" max="60" step="1" placeholder="auto"></label>
+      <div class="row">
+        <button id="clusterRun" class="primary">Find clusters</button>
+        <button id="clusterClear" disabled>Clear</button>
+      </div>
+      <label class="field check"><input type="checkbox" id="clusterBorders" checked> Show region borders and numbers</label>
+      <div class="muted small" id="clusterNote"></div>
+      <div class="muted small" id="clusterStatus" role="status"></div>
+    </section>
+
+    <p class="muted small help" id="staticNote" hidden>This is a static copy with precomputed views. Fitting new layouts and time windows needs the Python explorer.</p>
+    <p class="muted small help">Scroll to zoom, drag to pan, double-click to reset. <kbd>Space</kbd> plays, <kbd>←</kbd> <kbd>→</kbd> step, <kbd>L</kbd> flips between the last two layouts.</p>
+  </aside>
+
+  <section class="card" aria-labelledby="umapHead">
+    <div class="card-head">
+      <h2 id="umapHead">Embedding</h2>
+      <span class="muted" id="umapSub">Click a point to open its run at that moment.</span>
+    </div>
+    <div class="plot" id="umapWrap">
+      <canvas id="umapBase" aria-hidden="true"></canvas>
+      <canvas id="umapOver" role="img" aria-label="UMAP embedding; click a point to open its run"></canvas>
+      <div class="tooltip" id="tip" hidden></div>
+    </div>
+    <div class="legend" id="legend"></div>
+  </section>
+
+  <section class="card" aria-labelledby="runTitle">
+    <div class="card-head">
+      <h2 id="runTitle">No run selected</h2>
+      <span class="muted" id="runSub">Click a point in the embedding.</span>
+    </div>
+    <div class="plot" id="arenaWrap">
+      <canvas id="arena" role="img" aria-label="The selected run, top-down"></canvas>
+      <div class="empty" id="arenaEmpty">Click a point to play its run around that moment.</div>
+    </div>
+    <div class="arena-legend" aria-label="Arena legend">
+      <span><svg width="12" height="12"><circle cx="6" cy="6" r="3.5" fill="var(--prey)"/></svg>prey</span>
+      <span><svg width="12" height="12"><circle cx="6" cy="6" r="3.5" fill="var(--flee)"/></svg>fleeing prey</span>
+      <span><svg width="14" height="12"><path d="M13 6 L2 1.5 L4.5 6 L2 10.5 Z" fill="var(--ink)"/></svg>predator</span>
+      <span><svg width="14" height="12"><circle cx="7" cy="6" r="5" fill="none" stroke="var(--ink)" stroke-width="1.5"/></svg>nearest prey</span>
+      <span><svg width="12" height="12"><path d="M6 1 V11 M1 6 H11" stroke="var(--ink-2)" stroke-width="1.5"/></svg>school centre</span>
+      <span><svg width="14" height="12"><circle cx="7" cy="6" r="5" fill="none" stroke="var(--ink)" stroke-width="1" stroke-dasharray="2 2"/></svg>catch radius</span>
+    </div>
+
+    <div class="plot" id="timelineWrap">
+      <canvas id="timeline" role="img" aria-label="Distance to the nearest prey over the run; click to seek"></canvas>
+    </div>
+    <input type="range" id="scrub" min="0" max="0" value="0" step="1" aria-label="Frame" disabled>
+
+    <div class="controls">
+      <span class="group">
+        <button id="back10" aria-label="Back 10 frames" disabled>−10</button>
+        <button id="back1" aria-label="Back 1 frame" disabled>−1</button>
+        <button id="play" class="primary" disabled>Play</button>
+        <button id="fwd1" aria-label="Forward 1 frame" disabled>+1</button>
+        <button id="fwd10" aria-label="Forward 10 frames" disabled>+10</button>
+      </span>
+      <button id="toSel" disabled>Back to selected</button>
+      <label class="field">Speed
+        <select id="speed">
+          <option value="0.25">0.25×</option><option value="0.5">0.5×</option>
+          <option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option>
+        </select>
+      </label>
+      <label class="field">Window ± <input type="number" id="half" min="1" max="2000" value="50"> frames <span class="muted" id="halfSec"></span></label>
+      <label class="field"><input type="checkbox" id="loop" checked> Loop window</label>
+      <label class="field"><input type="checkbox" id="follow"> Follow predator</label>
+    </div>
+    <div class="status" id="status"></div>
+    <div class="values-wrap"><table class="values" id="values"></table></div>
+  </section>
+</main>
+
+<script>
+"use strict";
+
+// ---------------------------------------------------------------------------
+// small utilities
+// ---------------------------------------------------------------------------
+const $ = id => document.getElementById(id);
+const token = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+function decode(b64, Type) {
+  if (b64 == null) return null;
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Type(bytes.buffer);
+}
+
+function showError(message) {
+  $('bannerText').textContent = message;
+  $('banner').hidden = false;
+}
+window.addEventListener('error', e => showError(e.message));
+window.addEventListener('unhandledrejection', e => showError(String(e.reason && e.reason.message || e.reason)));
+
+function fmt(v, digits = 3) {
+  if (v == null || !Number.isFinite(v)) return '—';
+  const a = Math.abs(v);
+  if (a !== 0 && (a >= 1e4 || a < 1e-3)) return v.toExponential(2).replace('-', '−');
+  return Number(v.toPrecision(digits)).toString().replace('-', '−');
+}
+
+function percentile(sorted, p) {
+  if (!sorted.length) return NaN;
+  const k = clamp((sorted.length - 1) * p, 0, sorted.length - 1);
+  const lo = Math.floor(k), hi = Math.ceil(k);
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (k - lo);
+}
+
+function finiteSorted(values, visible) {
+  const out = [];
+  for (let i = 0; i < values.length; i++) if (visible(i) && Number.isFinite(values[i])) out.push(values[i]);
+  return out.sort((a, b) => a - b);
+}
+
+function sizeCanvas(canvas) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+  }
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { ctx, w, h };
+}
+
+// ---------------------------------------------------------------------------
+// color: ramps interpolated in OKLab, so equal steps in value look equal
+// ---------------------------------------------------------------------------
+const toLin = c => c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+const toSrgb = c => c <= 0.0031308 ? 12.92 * c : 1.055 * c ** (1 / 2.4) - 0.055;
+
+function hexToLab(hex) {
+  const h = hex.replace('#', '');
+  const [r, g, b] = [0, 2, 4].map(i => toLin(parseInt(h.slice(i, i + 2), 16) / 255));
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+  return [0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
+          1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
+          0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s];
+}
+
+function labToCss([L, a, b]) {
+  const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3;
+  const m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3;
+  const s = (L - 0.0894841775 * a - 1.2914855480 * b) ** 3;
+  const rgb = [4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+               -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+               -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s];
+  const [r, g, bb] = rgb.map(c => Math.round(255 * clamp(toSrgb(clamp(c, 0, 1)), 0, 1)));
+  return `rgb(${r},${g},${bb})`;
+}
+
+function rampColor(stops, t) {
+  const labs = stops.map(hexToLab);
+  const x = clamp(t, 0, 1) * (labs.length - 1);
+  const k = Math.min(Math.floor(x), labs.length - 2), f = x - k;
+  return labToCss(labs[k].map((v, j) => v + (labs[k + 1][j] - v) * f));
+}
+
+const isDark = () => getComputedStyle(document.documentElement).colorScheme.includes('dark');
+
+// one hue, light to dark; in dark mode low values recede toward the dark surface
+const SEQUENTIAL = {
+  light: ['#b7d3f6', '#86b6ef', '#5598e7', '#2a78d6', '#1c5cab', '#104281', '#0d366b'],
+  dark: ['#184f95', '#256abf', '#3987e5', '#6da7ec', '#9ec5f4', '#cde2fb'],
+};
+// blue for negative, red for positive, a visible neutral gray at zero
+const DIVERGING = {
+  light: ['#1c5cab', '#5598e7', '#c3c2b7', '#ec8483', '#c43b3a'],
+  dark: ['#5598e7', '#3a6db0', '#55544f', '#b85050', '#e66767'],
+};
+const BINS = 48;
+
+// ---------------------------------------------------------------------------
+// state
+// ---------------------------------------------------------------------------
+const S = {
+  P: null, n: 0,                 // the embedding, columnar
+  byRun: new Map(),              // run id -> point indices sorted by iteration
+  order: null,                   // a fixed shuffle, so no category is always drawn on top
+  colorBy: 'pass_time', dir: -1,
+  spec: null,                    // the current color encoding
+  bin: null, binColors: [],      // per-point color bin, and the css color of each bin
+  view: null, home: null,        // data -> screen transform for the embedding
+  hover: -1, sel: null,          // hovered point; selected {index, run, it}
+  run: null, runCache: new Map(), loading: null,
+  frame: 0, playing: false, speed: 1, half: 50, loop: true, follow: false,
+  fit: null, lastTs: null,
+  blocks: [], layouts: [],       // the metric blocks, and every layout the server knows
+  coords: new Map(),             // layout id -> {x, y}, once fetched
+  layoutId: 0, prevLayout: null, // shown now, and the one L flips back to
+  wantLayout: null,              // the last requested layout, shown as soon as it is done
+  requestedAt: new Map(), polling: new Set(), morphRaf: 0,
+  set: 0, sets: null, setsInfo: { api_version: 1 },  // the point set shown, and all of them
+  wantSet: null,
+  cl: null,                      // watershed regions: labels per point, borders, peaks
+  morphing: false,
+};
+
+// a point is drawn when it passes the direction filter and the shown layout placed it;
+// a layout fitted on one attack direction leaves the other points at NaN
+const visible = i => (S.dir < 0 || S.P.dir[i] === S.dir) && S.P.x[i] === S.P.x[i];
+
+// ---------------------------------------------------------------------------
+// loading the embedding
+// ---------------------------------------------------------------------------
+async function loadPoints() {
+  // the point sets first: whether this server can build new ones, and over which windows
+  const r = await fetch('api/sets');
+  if (r.ok) {
+    const meta = await r.json();
+    S.sets = meta.sets; S.setsInfo = meta;
+  } else {
+    S.sets = [{ id: 0, status: 'done', original: true }]; S.setsInfo = { api_version: 1, can_window: false };
+  }
+  setupSets();
+  if (S.setsInfo.static) {
+    // no Python behind this page: only what was exported can be shown
+    $('staticNote').hidden = false;
+    $('saveName').closest('.row').hidden = true;
+    $('windowRow').hidden = true;
+    $('windowOff').hidden = true;
+    $('layoutPanel').querySelector('details').hidden = true;
+  }
+  await loadSet(0);
+  if (S.setsInfo.api_version >= 6) {
+    $('savePanel').hidden = false;
+    $('deleteBtn').hidden = S.setsInfo.allow_delete === false;
+    await refreshSaves().catch(err => saveStatus(err.message, true));
+    // the server can open every visitor on one saved view
+    const start = S.setsInfo.start_view;
+    if (start && Array.from($('saveSel').options).some(o => o.value === start)) {
+      $('saveSel').value = start;
+      $('loadBtn').disabled = false;
+      await loadView().catch(err => saveStatus(err.message, true));
+    }
+  }
+}
+
+async function loadSet(setId) {
+  // swap in a whole point set: its points, its colors, its layouts. A selected run
+  // stays selected, on the new set's point nearest the selected moment
+  const r = await fetch(S.setsInfo.api_version >= 4 ? `api/sets/${setId}/points` : 'api/points');
+  const raw = await r.json();
+  if (!r.ok) throw new Error(raw.error || r.statusText);
+  const keep = S.sel ? { run: S.sel.run, it: S.sel.it } : null;
+  const P = {
+    x: decode(raw.x, Float32Array), y: decode(raw.y, Float32Array),
+    run: decode(raw.run, Int32Array), it: decode(raw.it, Int32Array),
+    progress: decode(raw.progress, Float32Array),
+    pass_time: decode(raw.pass_time, Float32Array),
+    dir: decode(raw.dir, Int32Array), dirs: raw.dirs, runs: raw.runs,
+    features: Object.fromEntries(Object.entries(raw.features).map(([k, v]) => [k, decode(v, Float32Array)])),
+  };
+  if ((raw.api_version || 1) < 7) {
+    showError('This page is newer than the Python server behind it, so the layout and ' +
+              'window options are incomplete. Re-run the explorer cell in the notebook, ' +
+              'then use the tab it opens.');
+  }
+  cancelAnimationFrame(S.morphRaf);
+  S.morphing = false;
+  if (S.set !== setId) S.cl = null;   // labels are per point, so they belong to one set
+  S.set = setId;
+  S.P = P; S.n = P.x.length;
+  // P.x and P.y hold what is drawn; the layouts themselves stay untouched in S.coords
+  S.coords = new Map([[0, { x: Float32Array.from(P.x), y: Float32Array.from(P.y) }]]);
+  S.blocks = raw.blocks || [];
+  S.layouts = raw.layouts || [];
+  S.layoutId = 0; S.prevLayout = null; S.wantLayout = null;
+  S.hover = -1; $('tip').hidden = true;
+
+  S.byRun = new Map();
+  for (let i = 0; i < S.n; i++) {
+    const id = P.run[i];
+    if (!S.byRun.has(id)) S.byRun.set(id, []);
+    S.byRun.get(id).push(i);
+  }
+  for (const list of S.byRun.values()) list.sort((a, b) => P.it[a] - P.it[b]);
+
+  S.order = new Int32Array(S.n).map((_, i) => i);
+  let seed = 7;
+  for (let i = S.n - 1; i > 0; i--) {   // deterministic shuffle
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    const j = seed % (i + 1);
+    [S.order[i], S.order[j]] = [S.order[j], S.order[i]];
+  }
+
+  document.title = raw.title;
+  $('title').textContent = raw.title;
+  $('subtitle').textContent = `${S.n.toLocaleString()} points from ${S.byRun.size} runs` +
+    (raw.n_features ? `, ${raw.n_features} features` : '');
+
+  // the color choices, keeping the current one when the new set has it too
+  const colorBy = $('colorBy'), before = colorBy.value;
+  const options = [['pass_time', 'time to closest approach'], ['progress', 'progress through the run'],
+                   ['attack_dir', 'attack direction']]
+    .filter(([k]) => k !== 'pass_time' || P.pass_time)
+    .concat(Object.keys(P.features).map(k => [`f:${k}`, k]));
+  if (S.cl) options.unshift(['cluster', 'watershed region']);
+  colorBy.replaceChildren();
+  for (const [value, label] of options) colorBy.add(new Option(label, value));
+  colorBy.value = options.some(([v]) => v === before) ? before : options[0][0];
+  S.colorBy = colorBy.value;
+  const dirFilter = $('dirFilter'), dirBefore = dirFilter.value;
+  dirFilter.replaceChildren(new Option('all', '-1'));
+  P.dirs.forEach((d, k) => dirFilter.add(new Option(d, String(k))));
+  dirFilter.value = Array.from(dirFilter.options).some(o => o.value === dirBefore) ? dirBefore : '-1';
+  S.dir = Number(dirFilter.value);
+
+  fitHome();
+  updateColors();
+  setupLayouts();
+  updateSetUI();
+  updateClusterUI();
+  if (keep) {
+    // the same run and moment, on this set's nearest point
+    const list = S.byRun.get(keep.run);
+    if (list && list.length) {
+      let best = list[0];
+      for (const i of list) if (Math.abs(P.it[i] - keep.it) < Math.abs(P.it[best] - keep.it)) best = i;
+      S.sel = { index: best, run: keep.run, it: keep.it };
+      $('values').dataset.point = '';
+    } else clearSelection();
+  }
+  drawAll();
+  if (S.sel) render(); else applyHash();
+  // layouts fitted before this page was opened, or by another tab
+  for (const L of S.layouts) if (L.status === 'queued' || L.status === 'running') pollLayout(L.id);
+}
+
+// ---------------------------------------------------------------------------
+// point sets: the embedding rebuilt over windows of the user's choosing
+// ---------------------------------------------------------------------------
+function setLabel(rec) {
+  const step = S.setsInfo.output_step || 0.1;
+  let text = rec.original ? 'As given in the notebook'
+    : `${rec.window}-iteration windows (${fmt(rec.window * step)} s), one point per window`;
+  if (rec.points != null) text += ` · ${rec.points.toLocaleString()} points`;
+  if (rec.status === 'queued') text += ' (queued)';
+  if (rec.status === 'running') text += ' (computing)';
+  if (rec.status === 'error') text += ' (failed)';
+  return text;
+}
+
+function setupSets() {
+  const info = S.setsInfo;
+  if (info.api_version < 4) return;
+  $('setPanel').hidden = false;
+  $('windowRow').hidden = !info.can_window;
+  $('windowOff').hidden = info.can_window;
+  const slider = $('winSlider');
+  if (info.window_range) { slider.min = String(info.window_range[0]); slider.max = String(info.window_range[1]); }
+  updateSetUI();
+}
+
+function updateSetUI() {
+  if (!S.sets || !$('setSel')) return;
+  const sel = $('setSel');
+  sel.replaceChildren();
+  for (const rec of S.sets) {
+    const opt = new Option(setLabel(rec), String(rec.id));
+    opt.disabled = rec.status !== 'done';
+    sel.add(opt);
+  }
+  sel.value = String(S.set);
+
+  const w = Number($('winSlider').value), step = S.setsInfo.output_step || 0.1;
+  $('winLabel').textContent = `${w} iterations, ${fmt(w * step)} s`;
+  const hit = S.sets.find(rec => rec.window === w && rec.status !== 'error'), btn = $('setRun');
+  if (hit && hit.status === 'done') { btn.textContent = 'Show points'; btn.disabled = hit.id === S.set; }
+  else if (hit) { btn.textContent = 'Computing …'; btn.disabled = true; }
+  else { btn.textContent = 'Compute points'; btn.disabled = false; }
+
+  const cur = S.sets.find(rec => rec.id === S.set);
+  $('setNote').textContent = !cur || cur.original
+    ? 'The embedding the explorer was started with.'
+    : `Every point stacks ${cur.window} consecutive iterations, and no two points of a run share a frame. ` +
+      (cur.same_run != null ? `${Math.round(cur.same_run * 100)}% of a point's 15 nearest neighbours in feature space come from its own run. ` : '') +
+      `Built in ${fmt(cur.seconds)} s.`;
+
+  const status = $('setStatus');
+  const pending = S.sets.filter(rec => rec.status === 'queued' || rec.status === 'running');
+  const failed = S.sets.find(rec => rec.id === S.wantSet && rec.status === 'error');
+  status.classList.toggle('bad', !!failed);
+  if (failed) status.textContent = `Window ${failed.window} failed: ${failed.error}`;
+  else if (pending.length) {
+    const first = pending[0], since = S.requestedAt.get(`set${first.id}`);
+    status.textContent = `Building features and UMAP for ${first.window}-iteration windows` +
+      (since != null ? `, ${Math.round((performance.now() - since) / 1000)} s so far` : '') + '.';
+  } else status.textContent = '';
+}
+
+async function refreshSets() {
+  const r = await fetch('api/sets');
+  const meta = await r.json();
+  if (!r.ok) throw new Error(meta.error || r.statusText);
+  S.sets = meta.sets;
+}
+
+async function requestSet() {
+  const w = Number($('winSlider').value);
+  const hit = S.sets.find(rec => rec.window === w && rec.status === 'done');
+  if (hit) { await showSet(hit.id); return; }
+  const r = await fetch('api/sets', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ window: w }),
+  });
+  const meta = await r.json();
+  if (!r.ok) { $('setStatus').textContent = meta.error || r.statusText; $('setStatus').classList.add('bad'); return; }
+  S.wantSet = meta.id;
+  if (!S.requestedAt.has(`set${meta.id}`)) S.requestedAt.set(`set${meta.id}`, performance.now());
+  await refreshSets();
+  updateSetUI();
+  while (true) {
+    const rec = S.sets.find(x => x.id === meta.id);
+    if (!rec || rec.status === 'error') break;
+    if (rec.status === 'done') { if (S.wantSet === meta.id) await showSet(meta.id); break; }
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    await refreshSets();
+    updateSetUI();
+  }
+  updateSetUI();
+}
+
+async function showSet(id) {
+  if (id === S.set) return;
+  await loadSet(id);
+  const rec = S.sets.find(x => x.id === id);
+  if (rec && rec.window) $('winSlider').value = String(rec.window);
+  updateSetUI();
+}
+
+$('winSlider').addEventListener('input', updateSetUI);
+$('setRun').addEventListener('click', () => requestSet().catch(err => showError(err.message)));
+$('setSel').addEventListener('change', e => showSet(Number(e.target.value)).catch(err => showError(err.message)));
+
+// ---------------------------------------------------------------------------
+// color encoding of the embedding
+// ---------------------------------------------------------------------------
+function updateColors() {
+  const P = S.P, key = S.colorBy, dark = isDark();
+  let spec;
+  if (key === 'attack_dir') {
+    spec = { kind: 'categorical', values: P.dir, names: P.dirs, label: 'attack direction' };
+  } else if (key === 'cluster' && S.cl) {
+    spec = { kind: 'categorical', cluster: true, label: 'watershed region' };
+  } else {
+    const values = key === 'pass_time' ? P.pass_time : key === 'progress' ? P.progress : P.features[key.slice(2)];
+    const sorted = finiteSorted(values, visible);
+    let lo = percentile(sorted, 0.02), hi = percentile(sorted, 0.98);
+    let kind = 'sequential', label = key.startsWith('f:') ? key.slice(2) : $('colorBy').selectedOptions[0].text;
+    if (key === 'progress') { lo = 0; hi = 1; }
+    // a quantity with real values on both sides of zero gets a diverging scale around zero
+    const signed = lo < 0 && hi > 0 && Math.min(-lo, hi) / Math.max(-lo, hi) > 0.25;
+    if (key === 'pass_time' || signed) {
+      kind = 'diverging';
+      const lim = key === 'pass_time' ? Math.min(5, Math.max(-lo, hi)) : Math.max(-lo, hi);
+      lo = -lim; hi = lim;
+    }
+    if (!(hi > lo)) hi = lo + 1e-9;
+    spec = { kind, values, lo, hi, label, unit: key === 'pass_time' ? ' s' : '' };
+  }
+  S.spec = spec;
+
+  if (spec.cluster) {
+    // 8 hues, handed out so that touching regions differ; the numbers name the regions
+    S.binColors = Array.from({ length: 8 }, (_, k) => token(`--cat-${k + 1}`)).concat([token('--muted')]);
+    const L = S.cl.labels, c = S.cl.colours;
+    S.bin = new Int32Array(S.n).map((_, i) => L[i] > 0 ? c[L[i] - 1] : 8);
+  } else if (spec.kind === 'categorical') {
+    S.binColors = spec.names.map((_, k) => token(`--cat-${(k % 8) + 1}`));
+    S.bin = new Int32Array(S.n).map((_, i) => spec.values[i]);
+  } else {
+    const stops = (spec.kind === 'diverging' ? DIVERGING : SEQUENTIAL)[dark ? 'dark' : 'light'];
+    S.binColors = Array.from({ length: BINS }, (_, k) => rampColor(stops, (k + 0.5) / BINS));
+    S.binColors.push(token('--muted'));    // the last bin holds values that are not finite
+    S.bin = new Int32Array(S.n);
+    for (let i = 0; i < S.n; i++) {
+      const v = spec.values[i];
+      S.bin[i] = Number.isFinite(v) ? clamp(Math.floor((v - spec.lo) / (spec.hi - spec.lo) * BINS), 0, BINS - 1) : BINS;
+    }
+  }
+  drawLegend();
+}
+
+function drawLegend() {
+  const legend = $('legend'), spec = S.spec;
+  legend.replaceChildren();
+  if (spec.cluster) {
+    const note = document.createElement('span');
+    const here = S.cl.layout === S.layoutId;
+    note.textContent = `${S.cl.regions} watershed regions, numbered by size on the map. ` +
+      'Colours only keep touching regions apart.' +
+      (S.cl.unassigned ? ' Gray points lie below the density floor.' : '') +
+      (here ? '' : ` The regions were found in layout #${S.cl.layout}; they are drawn on it only.`);
+    legend.append(note);
+    return;
+  }
+  if (spec.kind === 'categorical') {
+    spec.names.forEach((name, k) => {
+      const item = document.createElement('span');
+      const sw = document.createElement('span');
+      sw.className = 'swatch';
+      sw.style.background = S.binColors[k];
+      item.append(sw, document.createTextNode(name));
+      legend.append(item);
+    });
+    return;
+  }
+  const box = document.createElement('span');
+  box.className = 'scale';
+  const title = document.createElement('span');
+  title.textContent = spec.label + (spec.unit ? ` (${spec.unit.trim()})` : '');
+  const bar = document.createElement('canvas');
+  bar.width = 180; bar.height = 10;
+  const ctx = bar.getContext('2d');
+  S.binColors.slice(0, BINS).forEach((c, k) => { ctx.fillStyle = c; ctx.fillRect(k * 180 / BINS, 0, 180 / BINS + 1, 10); });
+  const ticks = document.createElement('span');
+  ticks.className = 'scale-ticks';
+  const mid = spec.kind === 'diverging' ? 0 : (spec.lo + spec.hi) / 2;
+  for (const v of [spec.lo, mid, spec.hi]) {
+    const t = document.createElement('span');
+    t.textContent = fmt(v);
+    ticks.append(t);
+  }
+  box.append(title, bar, ticks);
+  legend.append(box);
+  const note = document.createElement('span');
+  note.className = 'muted';
+  note.textContent = S.colorBy === 'progress' ? '' :
+    spec.kind === 'diverging'
+      ? (S.colorBy === 'pass_time' ? 'blue while closing in, red while pulling away; clipped at ±5 s'
+                                   : 'blue below zero, red above; clipped to the 2nd–98th percentile')
+      : 'clipped to the 2nd–98th percentile';
+  legend.append(note);
+}
+
+// ---------------------------------------------------------------------------
+// embedding: view transform, drawing, hit testing
+// ---------------------------------------------------------------------------
+function homeFor({ x, y }) {
+  // the view that fits one layout into the panel
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (let i = 0; i < x.length; i++) {
+    if (x[i] !== x[i]) continue;   // a point this layout left out
+    x0 = Math.min(x0, x[i]); x1 = Math.max(x1, x[i]);
+    y0 = Math.min(y0, y[i]); y1 = Math.max(y1, y[i]);
+  }
+  const c = $('umapBase');
+  const scale = 0.92 * Math.min(c.clientWidth / (x1 - x0 || 1), c.clientHeight / (y1 - y0 || 1));
+  return { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, scale, base: scale };
+}
+
+function fitHome() {
+  S.home = homeFor(S.coords.get(S.layoutId) || S.P);
+  S.view = { ...S.home };
+}
+
+function toScreen(i, w, h) {
+  const v = S.view;
+  return [w / 2 + (S.P.x[i] - v.cx) * v.scale, h / 2 - (S.P.y[i] - v.cy) * v.scale];
+}
+
+const pointRadius = () => clamp(1.6 * Math.sqrt(S.view.scale / S.view.base), 1.6, 5);
+
+function drawBaseFast() {
+  // while dragging or zooming: move and scale a picture of the last full drawing,
+  // instead of drawing every point again. Points outside it appear on release
+  const c = $('umapBase');
+  if (!S.drawnView) { drawBase(); return; }
+  if (!S.snap) {
+    const snap = document.createElement('canvas');
+    snap.width = c.width; snap.height = c.height;
+    if (!snap.width || !snap.height) { drawBase(); return; }
+    snap.getContext('2d').drawImage(c, 0, 0);
+    S.snap = { canvas: snap, view: S.drawnView };   // the view it was drawn with
+  }
+  const { ctx, w, h } = sizeCanvas(c);
+  const v0 = S.snap.view, v = S.view, k = v.scale / v0.scale;
+  // a screen point of the picture: x = w/2 + (data x - cx) * scale, so it moves to
+  const x = w / 2 - (w / 2) * k + (v0.cx - v.cx) * v.scale;
+  const y = h / 2 - (h / 2) * k - (v0.cy - v.cy) * v.scale;
+  ctx.clearRect(0, 0, w, h);
+  ctx.drawImage(S.snap.canvas, x, y, w * k, h * k);
+  // a full drawing always follows the last moved picture, however the drag or
+  // scroll ended: a release outside the page or a cancelled pointer included
+  settleBase(120);
+}
+
+let fullRedraw = 0;
+function settleBase(delay = 150) {
+  // one full drawing once the pointer or wheel has been still for a moment
+  clearTimeout(fullRedraw);
+  fullRedraw = setTimeout(() => { drawBase(); drawOverlay(); }, delay);
+}
+
+function drawBase() {
+  S.snap = null;
+  S.drawnView = S.view ? { ...S.view } : null;
+  clearTimeout(fullRedraw);
+  const { ctx, w, h } = sizeCanvas($('umapBase'));
+  ctx.clearRect(0, 0, w, h);
+  if (!S.P) return;
+  const r = pointRadius();
+  ctx.globalAlpha = S.sel ? (isDark() ? 0.32 : 0.22) : 0.8;
+  if (S.spec.kind === 'categorical') {
+    // in shuffled order, so the last category drawn does not hide the others. The
+    // shuffle is cut into a few batches, and each batch is drawn one color at a time:
+    // a color change per point costs a fill per point
+    const BATCHES = 16, size = Math.ceil(S.order.length / BATCHES);
+    const buckets = Array.from({ length: S.binColors.length }, () => []);
+    for (let start = 0; start < S.order.length; start += size) {
+      for (const b of buckets) b.length = 0;
+      for (let k = start; k < Math.min(start + size, S.order.length); k++) {
+        const i = S.order[k];
+        if (visible(i)) buckets[S.bin[i]].push(i);
+      }
+      buckets.forEach((list, c) => {
+        if (!list.length) return;
+        ctx.fillStyle = S.binColors[c];
+        ctx.beginPath();
+        for (const i of list) {
+          const [sx, sy] = toScreen(i, w, h);
+          ctx.moveTo(sx + r, sy);
+          ctx.arc(sx, sy, r, 0, 2 * Math.PI);
+        }
+        ctx.fill();
+      });
+    }
+  } else {
+    // extremes last, so they are not buried under the bulk of the distribution
+    const buckets = Array.from({ length: S.binColors.length }, () => []);
+    for (let i = 0; i < S.n; i++) if (visible(i)) buckets[S.bin[i]].push(i);
+    const mid = (BINS - 1) / 2;
+    const order = buckets.map((_, k) => k).sort((a, b) =>
+      S.spec.kind === 'diverging' ? Math.abs(a - mid) - Math.abs(b - mid) : a - b);
+    order.unshift(order.splice(order.indexOf(BINS), 1)[0]);   // non-finite first, underneath
+    for (const k of order) {
+      if (!buckets[k].length) continue;
+      ctx.fillStyle = S.binColors[k];
+      ctx.beginPath();
+      for (const i of buckets[k]) {
+        const [sx, sy] = toScreen(i, w, h);
+        ctx.moveTo(sx + r, sy);
+        ctx.arc(sx, sy, r, 0, 2 * Math.PI);
+      }
+      ctx.fill();
+    }
+  }
+  ctx.globalAlpha = 1;
+  drawRegions(ctx, w, h);
+}
+
+function drawRegions(ctx, w, h) {
+  // borders and numbers of the watershed regions, on the layout they were found in
+  const C = S.cl;
+  if (!C || C.layout !== S.layoutId || S.morphing || !$('clusterBorders').checked) return;
+  const v = S.view, X = x => w / 2 + (x - v.cx) * v.scale, Y = y => h / 2 - (y - v.cy) * v.scale;
+  const b = C.borders;
+  ctx.strokeStyle = token('--ink'); ctx.globalAlpha = 0.55; ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let k = 0; k < b.length; k += 4) {
+    ctx.moveTo(X(b[k]), Y(b[k + 1]));
+    ctx.lineTo(X(b[k + 2]), Y(b[k + 3]));
+  }
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+  ctx.font = '600 12px system-ui, -apple-system, "Segoe UI", sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.lineWidth = 3; ctx.lineJoin = 'round';
+  ctx.strokeStyle = token('--surface'); ctx.fillStyle = token('--ink');
+  C.peaks.forEach(([px, py], k) => {
+    const sx = X(px), sy = Y(py);
+    if (sx < -20 || sx > w + 20 || sy < -20 || sy > h + 20) return;
+    ctx.strokeText(String(k + 1), sx, sy);
+    ctx.fillText(String(k + 1), sx, sy);
+  });
+}
+
+function currentRunPoint() {
+  // the selected run's embedded point nearest in time to the frame being played
+  if (!S.sel) return -1;
+  const list = S.byRun.get(S.sel.run);
+  if (!list || !list.length) return -1;
+  const f = S.run && S.run.id === S.sel.run ? S.frame : S.sel.it;
+  let lo = 0, hi = list.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (S.P.it[list[mid]] < f) lo = mid + 1; else hi = mid;
+  }
+  if (lo > 0 && Math.abs(S.P.it[list[lo - 1]] - f) <= Math.abs(S.P.it[list[lo]] - f)) lo--;
+  return list[lo];
+}
+
+function drawOverlay() {
+  const { ctx, w, h } = sizeCanvas($('umapOver'));
+  ctx.clearRect(0, 0, w, h);
+  if (!S.P) return;
+  const r = pointRadius(), surface = token('--surface'), ink = token('--ink');
+
+  if (S.sel) {
+    const list = S.byRun.get(S.sel.run) || [];
+    ctx.strokeStyle = ink; ctx.globalAlpha = 0.3; ctx.lineWidth = 1; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    let pen = false;
+    for (const i of list) {
+      if (!visible(i)) { pen = false; continue; }
+      const [sx, sy] = toScreen(i, w, h);
+      pen ? ctx.lineTo(sx, sy) : ctx.moveTo(sx, sy);
+      pen = true;
+    }
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    for (const i of list) {
+      if (!visible(i)) continue;
+      const [sx, sy] = toScreen(i, w, h);
+      ctx.beginPath(); ctx.arc(sx, sy, r + 1.5, 0, 2 * Math.PI);
+      ctx.fillStyle = surface; ctx.fill();
+      ctx.beginPath(); ctx.arc(sx, sy, r + 0.5, 0, 2 * Math.PI);
+      ctx.fillStyle = S.binColors[S.bin[i]]; ctx.fill();
+    }
+    // the clicked point
+    if (visible(S.sel.index)) {
+      const [px, py] = toScreen(S.sel.index, w, h);
+      ctx.beginPath(); ctx.arc(px, py, r + 6, 0, 2 * Math.PI);
+      ctx.strokeStyle = ink; ctx.lineWidth = 2; ctx.stroke();
+    }
+    // where the playback is now
+    const now = currentRunPoint();
+    if (now >= 0 && visible(now)) {
+      const [nx, ny] = toScreen(now, w, h);
+      ctx.beginPath(); ctx.arc(nx, ny, 7, 0, 2 * Math.PI);
+      ctx.fillStyle = surface; ctx.fill();
+      ctx.beginPath(); ctx.arc(nx, ny, 5, 0, 2 * Math.PI);
+      ctx.fillStyle = ink; ctx.fill();
+    }
+  }
+  if (S.hover >= 0) {
+    const [hx, hy] = toScreen(S.hover, w, h);
+    ctx.beginPath(); ctx.arc(hx, hy, r + 4, 0, 2 * Math.PI);
+    ctx.strokeStyle = ink; ctx.lineWidth = 1.5; ctx.stroke();
+  }
+}
+
+function nearestPoint(mx, my) {
+  // the pointer only has to be closest, within 24 px, never dead-centre on a dot
+  const c = $('umapOver'), w = c.clientWidth, h = c.clientHeight;
+  let best = -1, bestD = 24 * 24;
+  for (let i = 0; i < S.n; i++) {
+    if (!visible(i)) continue;
+    const [sx, sy] = toScreen(i, w, h);
+    const d = (sx - mx) ** 2 + (sy - my) ** 2;
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  return best;
+}
+
+function showTip(i, mx, my) {
+  const tip = $('tip');
+  if (i < 0) { tip.hidden = true; return; }
+  const P = S.P, spec = S.spec;
+  tip.replaceChildren();
+  const value = document.createElement('div');
+  value.className = 'value';
+  const sub = document.createElement('div');
+  sub.className = 'row';
+  if (spec.cluster) {
+    const r = S.cl.labels[i];
+    value.textContent = r > 0 ? `region ${r}` : 'no region';
+  } else if (spec.kind === 'categorical') {
+    value.textContent = P.dirs[P.dir[i]];
+  } else {
+    value.textContent = fmt(spec.values[i]) + spec.unit;
+  }
+  const key = document.createElement('span');
+  key.className = 'key-line';
+  key.style.background = S.binColors[S.bin[i]];
+  sub.append(key, document.createTextNode(spec.label));
+  const runRow = document.createElement('div');
+  runRow.className = 'row';
+  runRow.textContent = `run ${P.run[i]} · ${P.dirs[P.dir[i]]}`;
+  const itRow = document.createElement('div');
+  itRow.className = 'row';
+  itRow.textContent = `frame ${P.it[i]}` + (P.pass_time ? ` · ${fmt(P.pass_time[i])} s from closest approach` : '');
+  tip.append(value, sub, runRow, itRow);
+  if (S.cl && !spec.cluster) {
+    const r = S.cl.labels[i], regRow = document.createElement('div');
+    regRow.className = 'row';
+    regRow.textContent = r > 0 ? `watershed region ${r}` : 'in no watershed region';
+    tip.append(regRow);
+  }
+  tip.hidden = false;
+  const wrap = $('umapWrap');
+  const tw = tip.offsetWidth, th = tip.offsetHeight;
+  tip.style.left = `${mx + 14 + tw > wrap.clientWidth ? mx - tw - 14 : mx + 14}px`;
+  tip.style.top = `${clamp(my - th / 2, 0, wrap.clientHeight - th)}px`;
+}
+
+// pointer handling: drag pans, wheel zooms about the pointer, a click selects
+(() => {
+  const el = $('umapOver');
+  let drag = null, raf = 0;
+  const local = e => { const b = el.getBoundingClientRect(); return [e.clientX - b.left, e.clientY - b.top]; };
+
+  el.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;   // a right-click menu can swallow the release
+    const [mx, my] = local(e);
+    drag = { mx, my, cx: S.view.cx, cy: S.view.cy, moved: false };
+    el.setPointerCapture(e.pointerId);
+  });
+  el.addEventListener('pointermove', e => {
+    if (!S.P) return;
+    const [mx, my] = local(e);
+    if (drag) {
+      if (Math.hypot(mx - drag.mx, my - drag.my) > 4) drag.moved = true;
+      if (drag.moved) {
+        S.view.cx = drag.cx - (mx - drag.mx) / S.view.scale;
+        S.view.cy = drag.cy + (my - drag.my) / S.view.scale;
+        $('tip').hidden = true;
+        cancelAnimationFrame(raf);
+        raf = requestAnimationFrame(() => { drawBaseFast(); drawOverlay(); });
+        return;
+      }
+    }
+    cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(() => {
+      S.hover = nearestPoint(mx, my);
+      showTip(S.hover, mx, my);
+      drawOverlay();
+    });
+  });
+  el.addEventListener('pointerup', e => {
+    const wasClick = drag && !drag.moved;
+    if (drag && drag.moved) { cancelAnimationFrame(raf); settleBase(0); }
+    drag = null;
+    if (!wasClick || !S.P) return;
+    const [mx, my] = local(e);
+    const i = nearestPoint(mx, my);
+    if (i >= 0) selectPoint(i);
+  });
+  const endDrag = () => {
+    if (drag && drag.moved) { cancelAnimationFrame(raf); settleBase(0); }
+    drag = null;
+  };
+  el.addEventListener('pointercancel', endDrag);
+  el.addEventListener('lostpointercapture', endDrag);
+  el.addEventListener('pointerleave', () => {
+    if (drag) return;
+    S.hover = -1; $('tip').hidden = true; drawOverlay();
+  });
+  el.addEventListener('wheel', e => {
+    if (!S.P) return;
+    e.preventDefault();
+    const [mx, my] = local(e), w = el.clientWidth, h = el.clientHeight, v = S.view;
+    const k = Math.exp(-e.deltaY * 0.0015);
+    const scale = clamp(v.scale * k, v.base * 0.5, v.base * 60);
+    const dx = (mx - w / 2), dy = (my - h / 2);
+    // keep the data point under the pointer fixed
+    v.cx += dx / v.scale - dx / scale;
+    v.cy -= dy / v.scale - dy / scale;
+    v.scale = scale;
+    cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(() => { drawBaseFast(); drawOverlay(); });
+    settleBase();
+  }, { passive: false });
+  el.addEventListener('dblclick', () => { S.view = { ...S.home }; drawBase(); drawOverlay(); });
+})();
+
+// ---------------------------------------------------------------------------
+// layouts: the same points laid out again from a subset of the metrics
+// ---------------------------------------------------------------------------
+const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function setupLayouts() {
+  if (!S.blocks.length) return;   // a result without its feature matrix
+  $('layoutPanel').hidden = false;
+  const box = $('metrics');
+  box.replaceChildren();
+  for (const b of S.blocks) {
+    const label = document.createElement('label');
+    const input = document.createElement('input');
+    input.type = 'checkbox'; input.value = b.name; input.checked = true;
+    const width = document.createElement('span');
+    width.className = 'w';
+    width.textContent = String(b.width);
+    label.title = b.live === 0
+      ? `${b.width} columns, none of which varies in this data, so it changes nothing`
+      : `${b.width} column${b.width > 1 ? 's' : ''}` + (b.live < b.width ? `, ${b.live} of which vary` : '');
+    if (b.live === 0) label.classList.add('dead');
+    label.append(input, document.createTextNode(b.name), width);
+    box.append(label);
+  }
+  const dirs = $('layoutDirs');
+  dirs.replaceChildren(new Option('all attack directions', ''));
+  for (const d of S.P.dirs) dirs.add(new Option(`${d} attacks only`, d));
+  updateLayoutUI();
+}
+// once, not per point set, so a listener is never attached twice
+$('metrics').addEventListener('change', () => updateLayoutUI());
+$('layoutDirs').addEventListener('change', () => updateLayoutUI());
+$('exclOn').addEventListener('change', () => { $('exclGap').disabled = !$('exclOn').checked; updateLayoutUI(); });
+$('exclGap').addEventListener('change', () => updateLayoutUI());
+
+const checkedNames = () => Array.from($('metrics').querySelectorAll('input'))
+  .filter(el => el.checked).map(el => el.value);
+
+function setChecked(names) {
+  for (const el of $('metrics').querySelectorAll('input')) el.checked = names.includes(el.value);
+}
+
+const sameSet = (a, b) => a.length === b.length && a.every(v => b.includes(v));
+const sameDirs = (a, b) => (a == null && b == null) || (a != null && b != null && sameSet(a, b));
+const matchLayout = (names, dirs, exclude) => S.layouts.find(L =>
+  L.status !== 'error' && sameSet(L.blocks, names) && sameDirs(L.dirs, dirs) &&
+  (L.exclude ?? null) === exclude);
+
+// null means every attack direction
+const chosenDirs = () => $('layoutDirs').value === '' ? null : [$('layoutDirs').value];
+
+// null: ordinary neighbours. 'run': none from the point's own run. A number: none
+// from its own run closer than that many seconds
+const chosenExclude = () => !$('exclOn').checked ? null
+  : $('exclGap').value === 'run' ? 'run' : Number($('exclGap').value);
+
+function setExclude(exclude) {
+  $('exclOn').checked = exclude != null;
+  $('exclGap').disabled = exclude == null;
+  if (exclude != null) $('exclGap').value = String(exclude);
+}
+
+const excludeText = exclude => exclude == null ? '' : exclude === 'run'
+  ? 'no neighbours from the own run' : `no own-run neighbours within ${fmt(exclude)} s`;
+
+function layoutLabel(L) {
+  const all = S.blocks.map(b => b.name);
+  let text;
+  if (L.original) text = `Original · all ${all.length} metrics`;
+  else {
+    const missing = all.filter(name => !L.blocks.includes(name));
+    text = `#${L.id} · ` + (!missing.length ? `all ${all.length} metrics`
+      : missing.length <= L.blocks.length ? `without ${missing.join(', ')}`
+      : `only ${L.blocks.join(', ')}`);
+  }
+  if (L.dirs) text += ` · ${L.dirs.join(', ')} points only`;
+  if (L.exclude != null) text += ` · ${excludeText(L.exclude)}`;
+  if (L.saved) text += ` · saved as "${L.saved}"`;
+  if (L.status === 'queued') text += ' (queued)';
+  if (L.status === 'running') text += ' (computing)';
+  if (L.status === 'error') text += ' (failed)';
+  return text;
+}
+
+function upsertLayout(meta) {
+  const k = S.layouts.findIndex(L => L.id === meta.id);
+  if (k >= 0) S.layouts[k] = meta; else S.layouts.push(meta);
+  S.layouts.sort((a, b) => a.id - b.id);
+}
+
+function updateLayoutUI() {
+  if (!S.blocks.length) return;
+  const sel = $('layoutSel');
+  sel.replaceChildren();
+  for (const L of S.layouts) {
+    const opt = new Option(layoutLabel(L), String(L.id));
+    opt.disabled = L.status !== 'done';
+    sel.add(opt);
+  }
+  sel.value = String(S.layoutId);
+  $('layoutFlip').disabled = S.prevLayout == null;
+
+  const L = S.layouts.find(l => l.id === S.layoutId);
+  if (L) {
+    let note = `${L.points.toLocaleString()} points` +
+      (L.dirs ? ` from the ${L.dirs.join(', ')} attacks, with every metric standardised over these points alone` : '') +
+      `. ${L.columns} columns, ${L.live} of which vary.` +
+      (L.exclude != null ? ` Built with ${excludeText(L.exclude)}.` : '') +
+      (L.same_run_2d != null ? ` In this picture ${Math.round(L.same_run_2d * 100)}% of a point's 15 nearest neighbours are from its own run.` : '');
+    if (!L.original && L.kept != null) {
+      note += ` On average ${Math.round(L.kept * 100)}% of a point's 15 nearest neighbours` +
+              ` are the same as in this point set's layout with every metric and direction. Fitted in ${fmt(L.seconds)} s.`;
+    }
+    $('layoutNote').textContent = note;
+  }
+
+  const names = checkedNames();
+  $('metricsCount').textContent = `(${names.length} of ${S.blocks.length} metrics` +
+    (chosenDirs() ? `, ${chosenDirs()[0]} only` : '') + (chosenExclude() != null ? ', own run excluded)' : ')');
+  const hit = matchLayout(names, chosenDirs(), chosenExclude()), btn = $('layoutRun');
+  if (!names.length) { btn.textContent = 'Compute layout'; btn.disabled = true; }
+  else if (hit && hit.status === 'done') { btn.textContent = 'Show layout'; btn.disabled = hit.id === S.layoutId; }
+  else if (hit) { btn.textContent = 'Computing …'; btn.disabled = true; }
+  else { btn.textContent = 'Compute layout'; btn.disabled = false; }
+
+  const status = $('layoutStatus');
+  const pending = S.layouts.filter(l => l.status === 'queued' || l.status === 'running');
+  const failed = S.layouts.find(l => l.id === S.wantLayout && l.status === 'error');
+  status.classList.toggle('bad', !!failed);
+  if (failed) status.textContent = `Layout #${failed.id} failed: ${failed.error}`;
+  else if (pending.length) {
+    const first = pending[0], since = S.requestedAt.get(first.id);
+    status.textContent = `Fitting UMAP for #${first.id}` +
+      (since != null ? `, ${Math.round((performance.now() - since) / 1000)} s so far` : '') +
+      (pending.length > 1 ? `; ${pending.length - 1} more queued` : '') + '.';
+  } else status.textContent = '';
+}
+
+async function requestLayout() {
+  const names = checkedNames();
+  if (!names.length) return;
+  const hit = matchLayout(names, chosenDirs(), chosenExclude());
+  if (hit && hit.status === 'done') { await showLayout(hit.id); return; }
+  const r = await fetch(`api/sets/${S.set}/layouts`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ blocks: names, dirs: chosenDirs(), exclude: chosenExclude() }),
+  });
+  const meta = await r.json();
+  if (!r.ok) {
+    $('layoutStatus').textContent = meta.error || r.statusText;
+    $('layoutStatus').classList.add('bad');
+    return;
+  }
+  upsertLayout(meta);
+  S.wantLayout = meta.id;
+  if (!S.requestedAt.has(meta.id)) S.requestedAt.set(meta.id, performance.now());
+  updateLayoutUI();
+  if (meta.status === 'done') await showLayout(meta.id);
+  else pollLayout(meta.id);
+}
+
+async function fetchCoords(id) {
+  if (S.coords.has(id)) return true;
+  const setId = S.set;
+  const r = await fetch(`api/sets/${setId}/layouts/${id}`);
+  const L = await r.json();
+  if (!r.ok) throw new Error(L.error || r.statusText);
+  if (S.set !== setId) return false;   // the point set changed meanwhile; drop the answer
+  if (L.status === 'done') {
+    S.coords.set(id, { x: decode(L.x, Float32Array), y: decode(L.y, Float32Array) });
+    delete L.x; delete L.y;
+  }
+  upsertLayout(L);
+  return L.status === 'done';
+}
+
+async function pollLayout(id) {
+  const key = `${S.set}:${id}`, setId = S.set;
+  if (S.polling.has(key)) return;
+  S.polling.add(key);
+  try {
+    while (S.set === setId) {
+      const done = await fetchCoords(id);
+      if (S.set !== setId) break;
+      const L = S.layouts.find(l => l.id === id);
+      if (done) { if (S.wantLayout === id) await showLayout(id); break; }
+      if (!L || L.status === 'error') break;
+      updateLayoutUI();
+      await new Promise(resolve => setTimeout(resolve, 700));
+    }
+  } catch (err) {
+    showError(`layout #${id}: ${err.message}`);
+  } finally {
+    S.polling.delete(key);
+    updateLayoutUI();
+  }
+}
+
+async function showLayout(id) {
+  if (id == null || id === S.layoutId) return;
+  if (!(await fetchCoords(id))) return;
+  S.prevLayout = S.layoutId;
+  S.layoutId = id;
+  const L = S.layouts.find(l => l.id === id);
+  if (L) { setChecked(L.blocks); $('layoutDirs').value = L.dirs ? L.dirs[0] : ''; setExclude(L.exclude ?? null); }
+  morphTo(S.coords.get(id));
+  updateLayoutUI();
+}
+
+function morphTo(to) {
+  // every point slides from where it is to where the new layout puts it, so the eye
+  // can follow a cluster from one layout into the next
+  // points the new layout leaves out vanish at once, and points it brings back start
+  // where they end, so only points present in both layouts slide
+  for (let i = 0; i < S.n; i++) {
+    if (to.x[i] !== to.x[i] || S.P.x[i] !== S.P.x[i]) { S.P.x[i] = to.x[i]; S.P.y[i] = to.y[i]; }
+  }
+  updateColors();   // the color scale spans the points that are shown
+  const from = { x: Float32Array.from(S.P.x), y: Float32Array.from(S.P.y) };
+  const v = S.view, h0 = S.home;
+  const wasHome = Math.abs(v.scale - h0.scale) < 1e-9 * h0.scale &&
+                  Math.abs(v.cx - h0.cx) < 1e-9 + 1e-6 * Math.abs(h0.cx) &&
+                  Math.abs(v.cy - h0.cy) < 1e-9 + 1e-6 * Math.abs(h0.cy);
+  const viewFrom = { ...v }, homeTo = homeFor(to);
+  const t0 = performance.now(), duration = reducedMotion() ? 0 : 700;
+  cancelAnimationFrame(S.morphRaf);
+  S.morphing = true;
+  const frame = now => {
+    const u = duration ? clamp((now - t0) / duration, 0, 1) : 1;
+    const e = u < 0.5 ? 4 * u ** 3 : 1 - (-2 * u + 2) ** 3 / 2;
+    for (let i = 0; i < S.n; i++) {
+      S.P.x[i] = from.x[i] + (to.x[i] - from.x[i]) * e;
+      S.P.y[i] = from.y[i] + (to.y[i] - from.y[i]) * e;
+    }
+    if (wasHome) {
+      for (const k of ['cx', 'cy', 'scale', 'base']) S.view[k] = viewFrom[k] + (homeTo[k] - viewFrom[k]) * e;
+    }
+    drawBase(); drawOverlay();
+    if (u < 1) S.morphRaf = requestAnimationFrame(frame);
+    else {
+      S.home = homeTo;
+      if (wasHome) S.view = { ...homeTo };
+      S.morphing = false;
+      drawBase(); drawOverlay();
+      drawLegend();
+      updateClusterUI();
+      finish();
+    }
+  };
+  let finish;
+  S.morphDone = new Promise(resolve => { finish = resolve; });
+  S.morphRaf = requestAnimationFrame(frame);
+}
+
+// ---------------------------------------------------------------------------
+// watershed clusters of the layout shown
+// ---------------------------------------------------------------------------
+function clusterStatus(text, bad = false) {
+  $('clusterStatus').textContent = text;
+  $('clusterStatus').classList.toggle('bad', bad);
+}
+
+function setColorOptionCluster(on) {
+  const sel = $('colorBy'), has = Array.from(sel.options).some(o => o.value === 'cluster');
+  if (on && !has) sel.add(new Option('watershed region', 'cluster'), 0);
+  if (!on && has) {
+    sel.remove(Array.from(sel.options).findIndex(o => o.value === 'cluster'));
+    if (S.colorBy === 'cluster') { sel.value = S.colorBy = sel.options[0].value; }
+  }
+}
+
+async function findClusters(k) {
+  const L = S.layouts.find(l => l.id === S.layoutId);
+  if (!L || L.status !== 'done') return;
+  const setId = S.set, layoutId = S.layoutId;
+  clusterStatus(k ? `Finding at most ${k} regions …` : 'Finding a stable number of regions …');
+  $('clusterRun').disabled = true;
+  try {
+    const r = await fetch(`api/sets/${setId}/layouts/${layoutId}/clusters`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ k: k || null }),
+    });
+    const got = await r.json();
+    if (!r.ok) { clusterStatus(got.error || r.statusText, true); return; }
+    if (S.set !== setId) return;   // the point set changed meanwhile
+    // base64 from the server, plain arrays from static.js
+    got.labels = typeof got.labels === 'string' ? decode(got.labels, Int32Array) : Int32Array.from(got.labels);
+    got.borders = typeof got.borders === 'string' ? decode(got.borders, Float32Array) : Float32Array.from(got.borders);
+    S.cl = got;
+    setColorOptionCluster(true);
+    $('colorBy').value = S.colorBy = 'cluster';
+    updateColors(); drawBase(); drawOverlay();
+    clusterStatus('');
+  } finally {
+    $('clusterRun').disabled = false;
+    updateClusterUI();
+  }
+}
+
+function clearClusters() {
+  S.cl = null;
+  setColorOptionCluster(false);
+  updateColors(); drawBase(); drawOverlay();
+  clusterStatus('');
+  updateClusterUI();
+}
+
+function updateClusterUI() {
+  if (!$('clusterPanel')) return;
+  $('clusterPanel').hidden = !(S.setsInfo.api_version >= 7);
+  const C = S.cl;
+  $('clusterClear').disabled = !C;
+  if (!C) { $('clusterNote').textContent = ''; return; }
+  const assigned = C.sizes.reduce((a, b) => a + b, 0);
+  const largest = C.sizes.length ? Math.round(C.sizes[0] / assigned * 100) : 0;
+  let note = `${C.regions} regions` + (C.k ? '' : ' (auto)') +
+    `. Smoothing is ${fmt(C.sigma_fraction * 100, 2)}% of the map width. The largest region holds ${largest}% of the points.`;
+  const p = C.plateaus[0];
+  if (!C.k && p && p.to / p.from < 1.5) note += ' No count is clearly stable.';
+  if (C.layout !== S.layoutId) note += ` Found in layout #${C.layout}.`;
+  $('clusterNote').textContent = note;
+}
+
+
+$('clusterRun').addEventListener('click', () => {
+  const raw = $('clusterK').value.trim();
+  const k = raw === '' ? null : Math.round(Number(raw));
+  if (k != null && !(k >= 2 && k <= 60)) { clusterStatus('Use 2 to 60 regions, or leave it empty.', true); return; }
+  findClusters(k).catch(err => clusterStatus(err.message, true));
+});
+$('clusterK').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('clusterRun').click(); } });
+$('clusterClear').addEventListener('click', clearClusters);
+$('clusterBorders').addEventListener('change', () => drawBase());
+
+// ---------------------------------------------------------------------------
+// saved views: a layout and what the page showed, kept on disk across sessions
+// ---------------------------------------------------------------------------
+function saveStatus(text, bad = false) {
+  $('saveStatus').textContent = text;
+  $('saveStatus').classList.toggle('bad', bad);
+}
+
+async function refreshSaves(select) {
+  const r = await fetch('api/saves');
+  const meta = await r.json();
+  if (!r.ok) throw new Error(meta.error || r.statusText);
+  S.saveDir = meta.dir;
+  const sel = $('saveSel');
+  sel.replaceChildren();
+  if (!meta.saves.length) sel.add(new Option('none saved yet', ''));
+  for (const d of meta.saves) {
+    const when = d.saved_at ? d.saved_at.replace('T', ' ').slice(0, 16) : 'unreadable';
+    const opt = new Option(`${d.name} · ${when}`, d.file);
+    opt.title = d.file;
+    opt.disabled = !!d.error;
+    sel.add(opt);
+  }
+  if (select) sel.value = select;
+  $('loadBtn').disabled = $('deleteBtn').disabled = !sel.value;
+}
+
+function captureView() {
+  // everything the page shows that is not the layout itself
+  return {
+    colorBy: S.colorBy,
+    dir: S.dir >= 0 ? S.P.dirs[S.dir] : null,
+    sel: S.sel ? { run: S.sel.run, it: S.sel.it } : null,
+    frame: S.run && S.sel && S.run.id === S.sel.run ? S.frame : null,
+    half: S.half, speed: S.speed, loop: S.loop, follow: S.follow,
+    view: { cx: S.view.cx, cy: S.view.cy, zoom: S.view.scale / S.home.base },
+    clusters: S.cl && S.cl.layout === S.layoutId ? { k: S.cl.k } : null,
+  };
+}
+
+async function saveView() {
+  const L = S.layouts.find(l => l.id === S.layoutId);
+  const name = $('saveName').value.trim() || (L ? layoutLabel(L) : 'unnamed view');
+  const r = await fetch('api/saves', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, set: S.set, layout: S.layoutId, view: captureView() }),
+  });
+  const meta = await r.json();
+  if (!r.ok) { saveStatus(meta.error || r.statusText, true); return; }
+  $('saveName').value = '';
+  await refreshSaves(meta.file);
+  saveStatus(`Saved "${meta.name}" to ${S.saveDir}.`);
+}
+
+async function loadView() {
+  const file = $('saveSel').value;
+  if (!file) return;
+  saveStatus('Loading …');
+  const r = await fetch('api/saves/load', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ file }),
+  });
+  const got = await r.json();
+  if (!r.ok) { saveStatus(got.error || r.statusText, true); return; }
+  const v = got.view || {};
+  await refreshSets();
+  if (got.set !== S.set) await loadSet(got.set);
+  else {
+    // the same point set: only its layout list may have grown
+    const lr = await fetch(`api/sets/${S.set}/layouts`);
+    if (lr.ok) S.layouts = await lr.json();
+  }
+  const rec = S.sets.find(x => x.id === got.set);
+  if (rec && rec.window) $('winSlider').value = String(rec.window);
+  updateSetUI();
+
+  // colors, filter and playback settings
+  if (v.colorBy && Array.from($('colorBy').options).some(o => o.value === v.colorBy)) {
+    $('colorBy').value = S.colorBy = v.colorBy;
+  }
+  const k = v.dir ? S.P.dirs.indexOf(v.dir) : -1;
+  $('dirFilter').value = String(k); S.dir = k;
+  if (v.half) { S.half = v.half; $('half').value = String(v.half); updateHalfLabel(); S.fit = null; }
+  if (v.speed) { S.speed = v.speed; $('speed').value = String(v.speed); }
+  if (v.loop != null) { S.loop = v.loop; $('loop').checked = v.loop; }
+  if (v.follow != null) { S.follow = v.follow; $('follow').checked = v.follow; S.fit = null; }
+  updateColors();
+
+  // the layout, then the zoom once the points have moved there
+  S.morphDone = null;
+  await showLayout(got.layout);
+  if (S.morphDone) await S.morphDone;
+  updateLayoutUI();
+  if (v.view && S.home) {
+    S.view = { cx: v.view.cx, cy: v.view.cy, scale: v.view.zoom * S.home.base, base: S.home.base };
+  }
+  if (v.clusters && S.setsInfo.api_version >= 7) {
+    await findClusters(v.clusters.k);
+    if (v.colorBy === 'cluster') { $('colorBy').value = S.colorBy = 'cluster'; updateColors(); }
+  }
+  drawBase(); drawOverlay();
+
+  // the selected run, at the saved moment
+  if (v.sel) {
+    const list = S.byRun.get(v.sel.run);
+    if (list && list.length) {
+      let best = list[0];
+      for (const i of list) if (Math.abs(S.P.it[i] - v.sel.it) < Math.abs(S.P.it[best] - v.sel.it)) best = i;
+      await selectPoint(best);
+      if (v.frame != null && S.run) seek(v.frame);
+    }
+  } else if (S.sel) clearSelection();
+  saveStatus(`Loaded "${got.name}".` + (got.warning ? ` Note: ${got.warning}.` : ''));
+}
+
+async function deleteView() {
+  const sel = $('saveSel'), file = sel.value;
+  if (!file) return;
+  const label = sel.selectedOptions[0] ? sel.selectedOptions[0].text : file;
+  if (!window.confirm(`Delete the saved view "${label}"? This cannot be undone.`)) return;
+  const r = await fetch('api/saves/delete', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ file }),
+  });
+  const meta = await r.json();
+  if (!r.ok) { saveStatus(meta.error || r.statusText, true); return; }
+  await refreshSaves();
+  saveStatus(`Deleted "${label}".`);
+}
+
+$('saveBtn').addEventListener('click', () => saveView().catch(err => saveStatus(err.message, true)));
+$('loadBtn').addEventListener('click', () => loadView().catch(err => saveStatus(err.message, true)));
+$('deleteBtn').addEventListener('click', () => deleteView().catch(err => saveStatus(err.message, true)));
+$('saveSel').addEventListener('change', () => { $('loadBtn').disabled = $('deleteBtn').disabled = !$('saveSel').value; });
+$('saveName').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('saveBtn').click(); } });
+
+$('layoutRun').addEventListener('click', () => requestLayout().catch(err => showError(err.message)));
+$('layoutSel').addEventListener('change', e => showLayout(Number(e.target.value)).catch(err => showError(err.message)));
+$('layoutFlip').addEventListener('click', () => showLayout(S.prevLayout).catch(err => showError(err.message)));
+$('metricsAll').addEventListener('click', () => { setChecked(S.blocks.map(b => b.name)); updateLayoutUI(); });
+$('metricsNone').addEventListener('click', () => { setChecked([]); updateLayoutUI(); });
+
+// ---------------------------------------------------------------------------
+// selection and run loading
+// ---------------------------------------------------------------------------
+async function selectPoint(i) {
+  const P = S.P;
+  S.sel = { index: i, run: P.run[i], it: P.it[i] };
+  $('clearSel').disabled = false;
+  history.replaceState(null, '', `#run=${S.sel.run}&it=${S.sel.it}`);
+  drawBase(); drawOverlay();
+
+  const meta = P.runs[String(S.sel.run)] || {};
+  $('runTitle').textContent = `Run ${S.sel.run} · ${P.dirs[P.dir[i]]}`;
+  $('runSub').textContent = (meta.file || '') + ` · selected frame ${S.sel.it}`;
+
+  if (!S.run || S.run.id !== S.sel.run) {
+    S.playing = false;
+    $('arenaWrap').style.opacity = S.run ? 0.5 : 1;   // keep the old frame while loading
+    if (!S.run) { $('arenaEmpty').hidden = false; $('arenaEmpty').textContent = `loading run ${S.sel.run} …`; }
+    const wanted = S.sel.run;
+    try {
+      const run = await loadRun(wanted);
+      if (!S.sel || S.sel.run !== wanted) return;   // another click won meanwhile
+      S.run = run;
+    } catch (err) {
+      $('arenaWrap').style.opacity = 1;
+      $('arenaEmpty').hidden = false;
+      $('arenaEmpty').textContent = `could not load run ${wanted}: ${err.message}`;
+      showError(`run ${wanted}: ${err.message}`);
+      return;
+    }
+    $('arenaWrap').style.opacity = 1;
+    $('arenaEmpty').hidden = true;
+    for (const id of ['back10', 'back1', 'play', 'fwd1', 'fwd10', 'toSel', 'scrub']) $(id).disabled = false;
+    $('scrub').max = String(S.run.frames - 1);
+    updateHalfLabel();
+  }
+  seek(S.sel.it, true);
+}
+
+async function loadRun(id) {
+  if (S.runCache.has(id)) return S.runCache.get(id);
+  const r = await fetch(`api/run/${id}`);
+  const raw = await r.json();
+  if (!r.ok) throw new Error(raw.error || r.statusText);
+  const dims = raw.axes.length, T = raw.frames, B = raw.bodies;
+  const pos = decode(raw.pos, Float32Array), vel = decode(raw.vel, Float32Array);
+  const flee = decode(raw.flee, Uint8Array);
+  const pred = B - 1;
+  // per frame: distance to the nearest prey, which prey that is, and the school centre
+  const near = new Float32Array(T), nearIdx = new Int32Array(T), com = new Float32Array(T * dims);
+  for (let t = 0; t < T; t++) {
+    const base = t * B * dims, px = pos[base + pred * dims], pz = pos[base + pred * dims + dims - 1];
+    const py = dims === 3 ? pos[base + pred * dims + 1] : 0;
+    let best = Infinity, bi = 0;
+    for (let b = 0; b < pred; b++) {
+      const o = base + b * dims;
+      let d = (pos[o] - px) ** 2 + (pos[o + dims - 1] - pz) ** 2;
+      if (dims === 3) d += (pos[o + 1] - py) ** 2;
+      if (d < best) { best = d; bi = b; }
+      for (let c = 0; c < dims; c++) com[t * dims + c] += pos[o + c] / pred;
+    }
+    near[t] = Math.sqrt(best); nearIdx[t] = bi;
+  }
+  const run = { ...raw, pos, vel, flee, dims, T, B, pred, near, nearIdx, com };
+  S.runCache.set(id, run);
+  if (S.runCache.size > 8) S.runCache.delete(S.runCache.keys().next().value);
+  return run;
+}
+
+function clearSelection() {
+  S.sel = null; S.run = null; S.playing = false;
+  history.replaceState(null, '', location.pathname);
+  $('clearSel').disabled = true;
+  $('runTitle').textContent = 'No run selected';
+  $('runSub').textContent = 'Click a point in the embedding.';
+  $('arenaEmpty').hidden = false;
+  $('arenaEmpty').textContent = 'Click a point to play its run around that moment.';
+  for (const id of ['back10', 'back1', 'play', 'fwd1', 'fwd10', 'toSel', 'scrub']) $(id).disabled = true;
+  $('play').textContent = 'Play';
+  $('status').textContent = '';
+  $('values').replaceChildren();
+  drawBase(); drawOverlay(); drawArena(); drawTimeline();
+}
+
+function applyHash() {
+  const m = /run=(-?\d+)&it=(\d+)/.exec(location.hash);
+  if (!m) return;
+  const list = S.byRun.get(Number(m[1]));
+  if (!list) return;
+  const it = Number(m[2]);
+  let best = list[0];
+  for (const i of list) if (Math.abs(S.P.it[i] - it) < Math.abs(S.P.it[best] - it)) best = i;
+  selectPoint(best);
+}
+
+// ---------------------------------------------------------------------------
+// playback
+// ---------------------------------------------------------------------------
+function windowRange() {
+  const lo = Math.max(0, S.sel.it - S.half), hi = Math.min(S.run.T - 1, S.sel.it + S.half);
+  return [lo, hi];
+}
+
+function seek(f, refit = false) {
+  if (!S.run) return;
+  S.frame = clamp(f, 0, S.run.T - 1);
+  if (refit) S.fit = null;
+  render();
+}
+
+function step(df) { S.playing = false; seek(Math.round(S.frame) + df); }
+
+function togglePlay() {
+  if (!S.run) return;
+  S.playing = !S.playing;
+  if (S.playing) {
+    const [lo, hi] = windowRange();
+    // pressing play at the end of the window starts it over rather than doing nothing
+    if (S.loop && (S.frame >= hi || S.frame < lo)) S.frame = lo;
+    if (!S.loop && S.frame >= S.run.T - 1) S.frame = 0;
+    S.lastTs = null;
+    requestAnimationFrame(tick);
+  }
+  render();
+}
+
+function tick(ts) {
+  if (!S.playing || !S.run) return;
+  if (S.lastTs != null) {
+    // real time at 1x: one frame per output_step seconds
+    S.frame += (ts - S.lastTs) / 1000 / S.run.output_step * S.speed;
+    const [lo, hi] = windowRange();
+    if (S.loop && S.frame > hi) S.frame = lo + (S.frame - hi) % Math.max(hi - lo, 1);
+    if (S.frame >= S.run.T - 1) { S.frame = S.run.T - 1; S.playing = false; }
+  }
+  S.lastTs = ts;
+  render();
+  if (S.playing) requestAnimationFrame(tick);
+}
+
+function updateHalfLabel() {
+  const step = S.run ? S.run.output_step : 0.1;
+  $('halfSec').textContent = `(±${fmt(S.half * step)} s)`;
+}
+
+function render() {
+  drawArena();
+  drawTimeline();
+  drawOverlay();
+  updateStatus();
+}
+
+// ---------------------------------------------------------------------------
+// arena: the run itself, top-down
+// ---------------------------------------------------------------------------
+function framePos(t, b, frac, t2) {
+  // body b at fractional time between frames t and t2, projected onto the screen plane
+  const { pos, B, dims } = S.run;
+  const o1 = (t * B + b) * dims, o2 = (t2 * B + b) * dims;
+  const x = pos[o1] + (pos[o2] - pos[o1]) * frac;
+  const z = pos[o1 + dims - 1] + (pos[o2 + dims - 1] - pos[o1 + dims - 1]) * frac;
+  return [x, z];
+}
+
+function computeCamera() {
+  // One camera per run, so scrubbing never snaps the view. At frame t the camera
+  // centres on the box around the predator and school centre over [t - half, t + half].
+  // That box moves by at most one step per frame, so the camera pans smoothly. The
+  // zoom is fixed for the whole run: it fits the largest of those boxes, widened by
+  // the spread of the school, so a few stragglers do not shrink everything to a dot.
+  const { pos, B, dims, pred, com, T } = S.run;
+  const px = new Float64Array(T), pz = new Float64Array(T);
+  const spread = [];
+  for (let t = 0; t < T; t++) {
+    px[t] = pos[(t * B + pred) * dims]; pz[t] = pos[(t * B + pred) * dims + dims - 1];
+    if (t % 5 === 0) {
+      const cx = com[t * dims], cz = com[t * dims + dims - 1];
+      for (let b = 0; b < pred; b++) {
+        const o = (t * B + b) * dims;
+        spread.push(Math.hypot(pos[o] - cx, pos[o + dims - 1] - cz));
+      }
+    }
+  }
+  spread.sort((a, b) => a - b);
+  const R = percentile(spread, 0.9) * 1.25;
+  const cx = new Float64Array(T), cz = new Float64Array(T);
+  let spanX = 0, spanZ = 0;
+  for (let t = 0; t < T; t++) {
+    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    for (let k = Math.max(0, t - S.half); k <= Math.min(T - 1, t + S.half); k++) {
+      const qx = com[k * dims], qz = com[k * dims + dims - 1];
+      x0 = Math.min(x0, px[k], qx); x1 = Math.max(x1, px[k], qx);
+      z0 = Math.min(z0, pz[k], qz); z1 = Math.max(z1, pz[k], qz);
+    }
+    cx[t] = (x0 + x1) / 2; cz[t] = (z0 + z1) / 2;
+    spanX = Math.max(spanX, x1 - x0); spanZ = Math.max(spanZ, z1 - z0);
+  }
+  return { cx, cz, spanX: spanX + 2 * R, spanZ: spanZ + 2 * R, T, half: S.half };
+}
+
+function drawArena() {
+  const { ctx, w, h } = sizeCanvas($('arena'));
+  ctx.clearRect(0, 0, w, h);
+  if (!S.run) return;
+  const run = S.run, { B, pred, dims } = run;
+  const t = Math.floor(S.frame), t2 = Math.min(t + 1, run.T - 1), frac = S.frame - t;
+
+  if (!S.fit || S.fit.T !== run.T || S.fit.half !== S.half) S.fit = computeCamera();
+  const fit = S.fit, pad = 16;
+  const scale = Math.min((w - 2 * pad) / (fit.spanX || 1), (h - 2 * pad) / (fit.spanZ || 1));
+  let cx = fit.cx[t] + (fit.cx[t2] - fit.cx[t]) * frac;
+  let cz = fit.cz[t] + (fit.cz[t2] - fit.cz[t]) * frac;
+  const [predX, predZ] = framePos(t, pred, frac, t2);
+  if (S.follow) { cx = predX; cz = predZ; }
+  // x to the right, z downward: the same top view as plot_3d_animation's (x, -z)
+  const sx = x => w / 2 + (x - cx) * scale, sz = z => h / 2 + (z - cz) * scale;
+
+  const ink = token('--ink'), ink2 = token('--ink-2'), surface = token('--surface');
+  const prey = token('--prey'), fleeC = token('--flee');
+
+  // scale bar, bottom left: a round length that is about a sixth of the width
+  const target = w / 6 / scale, mag = 10 ** Math.floor(Math.log10(target));
+  const len = [1, 2, 5, 10].map(k => k * mag).reduce((a, b) => Math.abs(b - target) < Math.abs(a - target) ? b : a);
+  ctx.strokeStyle = ink2; ctx.lineWidth = 2; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(pad, h - pad); ctx.lineTo(pad + len * scale, h - pad); ctx.stroke();
+  ctx.fillStyle = ink2; ctx.font = '12px system-ui, -apple-system, "Segoe UI", sans-serif';
+  ctx.fillText(`${fmt(len)} length units`, pad, h - pad - 6);
+
+  // predator trail: the last 4 seconds
+  const trail = Math.round(4 / run.output_step);
+  ctx.strokeStyle = ink; ctx.globalAlpha = 0.3; ctx.lineWidth = 2; ctx.lineJoin = 'round';
+  ctx.beginPath();
+  for (let k = Math.max(0, t - trail); k <= t; k++) {
+    const [x, z] = framePos(k, pred, 0, k);
+    k === Math.max(0, t - trail) ? ctx.moveTo(sx(x), sz(z)) : ctx.lineTo(sx(x), sz(z));
+  }
+  ctx.lineTo(sx(predX), sz(predZ));
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+
+  // prey: a dot and a short heading tick each, orange while fleeing
+  const near = run.nearIdx[frac < 0.5 ? t : t2];
+  for (const fleeing of [0, 1]) {
+    ctx.fillStyle = ctx.strokeStyle = fleeing ? fleeC : prey;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (let b = 0; b < pred; b++) {
+      const f = run.flee ? run.flee[(frac < 0.5 ? t : t2) * pred + b] : 0;
+      if (f !== fleeing) continue;
+      const [x, z] = framePos(t, b, frac, t2);
+      const o = (t * B + b) * dims;
+      const vx = run.vel[o], vz = run.vel[o + dims - 1], vn = Math.hypot(vx, vz) || 1;
+      ctx.moveTo(sx(x), sz(z));
+      ctx.lineTo(sx(x) + vx / vn * 7, sz(z) + vz / vn * 7);
+    }
+    ctx.stroke();
+    ctx.beginPath();
+    for (let b = 0; b < pred; b++) {
+      const f = run.flee ? run.flee[(frac < 0.5 ? t : t2) * pred + b] : 0;
+      if (f !== fleeing) continue;
+      const [x, z] = framePos(t, b, frac, t2);
+      ctx.moveTo(sx(x) + 3, sz(z));
+      ctx.arc(sx(x), sz(z), 3, 0, 2 * Math.PI);
+    }
+    ctx.fill();
+  }
+
+  // nearest prey ring
+  const [nx, nz] = framePos(t, near, frac, t2);
+  ctx.strokeStyle = ink; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(sx(nx), sz(nz), 7, 0, 2 * Math.PI); ctx.stroke();
+
+  // school centre
+  const comX = run.com[t * dims] + (run.com[t2 * dims] - run.com[t * dims]) * frac;
+  const comZ = run.com[t * dims + dims - 1] + (run.com[t2 * dims + dims - 1] - run.com[t * dims + dims - 1]) * frac;
+  ctx.strokeStyle = ink2; ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(sx(comX) - 6, sz(comZ)); ctx.lineTo(sx(comX) + 6, sz(comZ));
+  ctx.moveTo(sx(comX), sz(comZ) - 6); ctx.lineTo(sx(comX), sz(comZ) + 6);
+  ctx.stroke();
+
+  // catch radius, then the predator as a triangle along its velocity
+  ctx.strokeStyle = ink; ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
+  ctx.beginPath(); ctx.arc(sx(predX), sz(predZ), Math.max(run.r_catch * scale, 2), 0, 2 * Math.PI); ctx.stroke();
+  ctx.setLineDash([]);
+  const o = (t * B + pred) * dims;
+  const vx = run.vel[o], vz = run.vel[o + dims - 1], vn = Math.hypot(vx, vz) || 1;
+  const ux = vx / vn, uz = vz / vn;
+  const tip = [sx(predX) + ux * 11, sz(predZ) + uz * 11];
+  const left = [sx(predX) - ux * 6 - uz * 6, sz(predZ) - uz * 6 + ux * 6];
+  const notch = [sx(predX) - ux * 2, sz(predZ) - uz * 2];
+  const right = [sx(predX) - ux * 6 + uz * 6, sz(predZ) - uz * 6 - ux * 6];
+  ctx.beginPath();
+  ctx.moveTo(...tip); ctx.lineTo(...left); ctx.lineTo(...notch); ctx.lineTo(...right); ctx.closePath();
+  ctx.lineWidth = 3; ctx.strokeStyle = surface; ctx.stroke();
+  ctx.fillStyle = ink; ctx.fill();
+
+  // clock, top left
+  ctx.fillStyle = ink2;
+  ctx.fillText(`frame ${t} · ${fmt(S.frame * run.output_step)} s`, pad, pad + 4);
+}
+
+// ---------------------------------------------------------------------------
+// timeline: distance to the nearest prey over the whole run
+// ---------------------------------------------------------------------------
+const TL = { left: 34, right: 8, top: 16, bottom: 18 };
+
+function drawTimeline() {
+  const { ctx, w, h } = sizeCanvas($('timeline'));
+  ctx.clearRect(0, 0, w, h);
+  if (!S.run) return;
+  const run = S.run, T = run.T;
+  const ink = token('--ink'), ink2 = token('--ink-2'), muted = token('--muted');
+  const grid = token('--grid'), wash = token('--wash');
+  const x = f => TL.left + f / Math.max(T - 1, 1) * (w - TL.left - TL.right);
+  let max = 0;
+  for (let t = 0; t < T; t++) max = Math.max(max, run.near[t]);
+  const y = d => h - TL.bottom - d / (max || 1) * (h - TL.top - TL.bottom);
+  ctx.font = '12px system-ui, -apple-system, "Segoe UI", sans-serif';
+
+  // the playback window
+  const [lo, hi] = windowRange();
+  ctx.fillStyle = wash;
+  ctx.fillRect(x(lo), TL.top, x(hi) - x(lo), h - TL.top - TL.bottom);
+
+  // recessive grid and labels
+  ctx.strokeStyle = grid; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(TL.left, y(0) + 0.5); ctx.lineTo(w - TL.right, y(0) + 0.5); ctx.stroke();
+  ctx.fillStyle = muted;
+  ctx.textAlign = 'right';
+  ctx.fillText('0', TL.left - 6, y(0) + 4);
+  ctx.fillText(fmt(max, 2), TL.left - 6, y(max) + 4);
+  ctx.textAlign = 'left';
+  ctx.fillStyle = ink2;
+  ctx.fillText('distance to nearest prey, length units', TL.left, 11);
+  ctx.fillStyle = muted;
+  const seconds = (T - 1) * run.output_step;
+  const stepS = [1, 2, 5, 10, 20, 50].find(s => seconds / s <= 8) || 100;
+  ctx.textAlign = 'center';
+  for (let s = 0; s <= seconds + 1e-9; s += stepS) ctx.fillText(`${s} s`, x(s / run.output_step), h - 4);
+  ctx.textAlign = 'left';
+
+  // the series
+  ctx.strokeStyle = ink2; ctx.lineWidth = 2; ctx.lineJoin = 'round';
+  ctx.beginPath();
+  for (let t = 0; t < T; t++) t ? ctx.lineTo(x(t), y(run.near[t])) : ctx.moveTo(x(t), y(run.near[t]));
+  ctx.stroke();
+
+  // the selected frame, dashed, and the playhead, solid
+  if (S.sel) {
+    ctx.strokeStyle = ink; ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
+    ctx.beginPath(); ctx.moveTo(x(S.sel.it) + 0.5, TL.top); ctx.lineTo(x(S.sel.it) + 0.5, h - TL.bottom); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  ctx.strokeStyle = ink; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(x(S.frame), TL.top); ctx.lineTo(x(S.frame), h - TL.bottom); ctx.stroke();
+  const t = Math.round(S.frame);
+  ctx.beginPath(); ctx.arc(x(S.frame), y(run.near[t]), 4, 0, 2 * Math.PI);
+  ctx.fillStyle = ink; ctx.fill();
+}
+
+(() => {
+  const el = $('timeline');
+  let dragging = false;
+  const frameAt = e => {
+    const b = el.getBoundingClientRect();
+    const f = (e.clientX - b.left - TL.left) / (b.width - TL.left - TL.right) * (S.run.T - 1);
+    return Math.round(clamp(f, 0, S.run.T - 1));
+  };
+  el.addEventListener('pointerdown', e => {
+    if (!S.run) return;
+    dragging = true; el.setPointerCapture(e.pointerId);
+    S.playing = false; seek(frameAt(e));
+  });
+  el.addEventListener('pointermove', e => { if (dragging && S.run) seek(frameAt(e)); });
+  el.addEventListener('pointerup', () => { dragging = false; });
+})();
+
+// ---------------------------------------------------------------------------
+// readouts
+// ---------------------------------------------------------------------------
+function updateStatus() {
+  if (!S.run || !S.sel) return;
+  const run = S.run, t = Math.round(S.frame);
+  $('play').textContent = S.playing ? 'Pause' : 'Play';
+  $('scrub').value = String(t);
+  const now = currentRunPoint();
+  const pt = now >= 0 && S.P.pass_time ? ` · ${fmt(S.P.pass_time[now])} s from closest approach` : '';
+  $('status').textContent =
+    `frame ${t} of ${run.T - 1} · ${fmt(t * run.output_step)} s · nearest prey ${fmt(run.near[t])} length units` + pt;
+
+  const table = $('values');
+  if (table.dataset.point === String(now)) return;
+  table.dataset.point = String(now);
+  table.replaceChildren();
+  if (now < 0) return;
+  const caption = table.createCaption();
+  caption.textContent = `features at the nearest embedded point, frame ${S.P.it[now]}`;
+  const body = table.createTBody();
+  for (const [name, values] of Object.entries(S.P.features)) {
+    const row = body.insertRow();
+    row.insertCell().textContent = name;
+    const cell = row.insertCell();
+    cell.className = 'num';
+    cell.textContent = fmt(values[now]);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// controls
+// ---------------------------------------------------------------------------
+$('colorBy').addEventListener('change', e => { S.colorBy = e.target.value; updateColors(); drawBase(); drawOverlay(); });
+$('dirFilter').addEventListener('change', e => {
+  S.dir = Number(e.target.value);
+  updateColors(); drawBase(); drawOverlay();
+});
+$('clearSel').addEventListener('click', clearSelection);
+$('play').addEventListener('click', togglePlay);
+$('back10').addEventListener('click', () => step(-10));
+$('back1').addEventListener('click', () => step(-1));
+$('fwd1').addEventListener('click', () => step(1));
+$('fwd10').addEventListener('click', () => step(10));
+$('toSel').addEventListener('click', () => { S.playing = false; seek(S.sel.it, true); });
+$('scrub').addEventListener('input', e => { S.playing = false; seek(Number(e.target.value)); });
+$('speed').addEventListener('change', e => { S.speed = Number(e.target.value); });
+$('half').addEventListener('change', e => {
+  S.half = clamp(Math.round(Number(e.target.value)) || 50, 1, 2000);
+  e.target.value = String(S.half);
+  S.fit = null; updateHalfLabel(); render();
+});
+$('loop').addEventListener('change', e => { S.loop = e.target.checked; });
+$('follow').addEventListener('change', e => { S.follow = e.target.checked; S.fit = null; render(); });
+
+document.addEventListener('keydown', e => {
+  const tag = (e.target.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
+  if (e.key === ' ') { e.preventDefault(); togglePlay(); }
+  else if (e.key === 'ArrowLeft') { e.preventDefault(); step(e.shiftKey ? -10 : -1); }
+  else if (e.key === 'ArrowRight') { e.preventDefault(); step(e.shiftKey ? 10 : 1); }
+  else if (e.key === 'Escape' && S.sel) clearSelection();
+  else if ((e.key === 'l' || e.key === 'L') && S.prevLayout != null) showLayout(S.prevLayout);
+});
+
+function drawAll() { drawBase(); drawOverlay(); drawArena(); drawTimeline(); }
+new ResizeObserver(() => {
+  if (!S.P) return;
+  // keep the zoom relative to the fitted view when the panel changes size
+  const ratio = S.view ? S.view.scale / S.view.base : 1;
+  const center = S.view ? [S.view.cx, S.view.cy] : null;
+  fitHome();
+  if (center) { S.view.cx = center[0]; S.view.cy = center[1]; S.view.scale = S.view.base * ratio; }
+  drawAll();
+}).observe($('umapWrap'));
+new ResizeObserver(() => { drawArena(); drawTimeline(); }).observe($('arenaWrap'));
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+  if (S.P) { updateColors(); drawAll(); }
+});
+
+loadPoints().catch(err => showError(`could not load the embedding: ${err.message}`));
+</script>
+</body>
+</html>
