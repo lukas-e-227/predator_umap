@@ -7,10 +7,11 @@ DATASETS lists the datasets. Each one has its hdf5 logs in data/<dataset>/, its 
 in bundle_<dataset>.pkl and its saved views in saves/<dataset>/. The page shows one
 dataset at a time and has a menu to switch between them.
 
-The page normally asks a Python server for its data. Here the server runs once per
-dataset, on this machine: every saved view is loaded into it, which builds that
-view's point set and layout exactly as the live explorer would. Then every answer the
-page can ask for is written to a file under docs/api/<dataset>/:
+The page normally asks the Python explorer's web server for its data. Here the
+explorer is created once per dataset, with serve=False, so no server starts. Every
+saved view is loaded into it, which builds that view's point set and layout exactly
+as the live explorer would. Then every answer the page can ask for is written to a
+file under docs/api/<dataset>/:
 
     sets.json                      point sets
     sets/<s>/points.json           one point set's points and colors
@@ -32,6 +33,7 @@ saves folder, so later builds load it instead of fitting again.
 To add a view to the site: open it in the notebook's explorer, save it, copy its JSON
 from umap_explorer_saves/ into saves/<dataset>/, and run this script again.
 """
+import base64
 import json
 import os
 import pickle
@@ -40,6 +42,7 @@ import sys
 import time
 
 import matplotlib
+import numpy as np
 matplotlib.use('Agg')
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -54,13 +57,40 @@ TITLE = 'Predator attack UMAP explorer'
 # key: the folder name under data/ and saves/. label: the name in the page's menu.
 # start: the saved view every visitor opens on. With None the page opens on the
 # point set's first layout, which uses every metric and every point.
+# The page opens on the first dataset in this list.
 DATASETS = [
-    {'key': 'prey1', 'label': 'optimized prey',
-     'start': 'predator-behavior-window15_20261105-153045.json'},
     {'key': 'mass', 'label': 'predator with mass',
      'start': None},
+    {'key': 'prey1', 'label': 'optimized prey',
+     'start': 'predator-behavior-window15_20261105-153045.json'},
 ]
 TEMPLATE = ('prey1', 'predator-behavior-window15_20261105-153045.json')
+
+
+def shrink_run(payload):
+    """-> a run's payload in about a third of the bytes, for a faster Pages deploy
+
+    The server sends each body's position and velocity as 32-bit floats. Here each
+    position axis becomes a 16-bit integer between that axis's lowest and highest
+    value in the run. The step is far below a pixel; for a run 40 length units wide
+    it is 0.0006 length units. The page only draws the velocity's direction, so it
+    becomes one byte per body: the angle of (first axis, last axis), in 256 steps
+    of 1.4 degrees. index.html turns both back into floats.
+    """
+    run = json.loads(payload)
+    dims = len(run['axes'])
+    shape = (run['frames'], run['bodies'], dims)
+    pos = np.frombuffer(base64.b64decode(run.pop('pos')), '<f4').reshape(shape).astype(float)
+    vel = np.frombuffer(base64.b64decode(run.pop('vel')), '<f4').reshape(shape).astype(float)
+    lo = pos.min(axis=(0, 1))
+    step = np.maximum(pos.max(axis=(0, 1)) - lo, 1e-6) / 65535
+    q = np.round((pos - lo) / step).astype('<u2')
+    angle = np.arctan2(vel[..., -1], vel[..., 0])
+    heading = np.round(angle / (2 * np.pi) * 256).astype(int) % 256
+    run.update(pos_u16=base64.b64encode(q.tobytes()).decode(),
+               pos_lo=lo.tolist(), pos_step=step.tolist(),
+               heading_u8=base64.b64encode(heading.astype(np.uint8).tobytes()).decode())
+    return json.dumps(run).encode()
 
 
 def write(path, data):
@@ -93,7 +123,7 @@ def make_view_like_template(app):
     return app.save_view(doc['name'], 0, meta['id'], view)['file']
 
 
-def export(ds, port):
+def export(ds):
     """-> the bytes written, after exporting one dataset to docs/api/<key>/"""
     key = ds['key']
     with open(os.path.join(HERE, f'bundle_{key}.pkl'), 'rb') as f:
@@ -104,59 +134,57 @@ def export(ds, port):
             entry['file'] = os.path.join(HERE, 'data', key, entry['file'])
 
     app = umap_explorer.UmapExplorer(
-        res, ctrl, open_browser=False, port=port,
+        res, ctrl, serve=False, open_browser=False,
         feature_fn=features.controller_school_features,
         save_dir=os.path.join(HERE, 'saves', key), title=TITLE)
-    try:
-        start = ds['start']
-        if not app.list_saves():
-            make_view_like_template(app)
-        saves = app.list_saves()
-        loads = {}
-        for save in saves:
-            app.load_view(save['file'])                 # builds its set and layout
-            loads[save['file']] = app.load_view(save['file'])   # now only finds them
-            if loads[save['file']].get('warning'):
-                print(f"  {save['file']}: {loads[save['file']]['warning']}")
-        if start not in loads:
-            start = None
-        for got in loads.values():
-            # a saved view opens with no run selected; the visitor picks one
-            for k in ('sel', 'frame'):
-                got['view'].pop(k, None)
+    start = ds['start']
+    if not app.list_saves():
+        make_view_like_template(app)
+    saves = app.list_saves()
+    loads = {}
+    for save in saves:
+        app.load_view(save['file'])                 # builds its set and layout
+        loads[save['file']] = app.load_view(save['file'])   # now only finds them
+        if loads[save['file']].get('warning'):
+            print(f"  {save['file']}: {loads[save['file']]['warning']}")
+    if start not in loads:
+        start = None
+    for got in loads.values():
+        # a saved view opens with no run selected; the visitor picks one
+        for k in ('sel', 'frame'):
+            got['view'].pop(k, None)
 
-        out = os.path.join(API, key)
-        size = 0
-        meta = app._sets_meta()
-        meta.update(static=True, can_window=False, allow_delete=False, start_view=start)
-        size += write(os.path.join(out, 'sets.json'), meta)
-        for rec in meta['sets']:
-            if rec['status'] != 'done':
-                continue
-            s = rec['id']
-            size += write(os.path.join(out, 'sets', str(s), 'points.json'),
-                          app._points_payload(s))
-            layouts = [L for L in app._layouts_meta(s) if L['status'] == 'done']
-            size += write(os.path.join(out, 'sets', str(s), 'layouts.json'), layouts)
-            for L in layouts:
-                size += write(os.path.join(out, 'sets', str(s), 'layouts', f"{L['id']}.json"),
-                              app._layout_payload(s, L['id']))
-        for run_id in sorted(app._files):
-            size += write(os.path.join(out, 'run', f'{run_id}.json'), app._run_payload(run_id))
-        size += write(os.path.join(out, 'saves.json'), {'dir': 'this site', 'saves': saves})
-        for file, got in loads.items():
-            size += write(os.path.join(out, 'saves', 'load', file), got)
-        print(f"{key}: {len(meta['sets'])} point sets, {len(app._files)} runs, "
-              f"{len(loads)} saved views, {size / 1e6:.0f} MB")
-        return size
-    finally:
-        app.stop()
+    out = os.path.join(API, key)
+    size = 0
+    meta = app._sets_meta()
+    meta.update(static=True, can_window=False, allow_delete=False, start_view=start)
+    size += write(os.path.join(out, 'sets.json'), meta)
+    for rec in meta['sets']:
+        if rec['status'] != 'done':
+            continue
+        s = rec['id']
+        size += write(os.path.join(out, 'sets', str(s), 'points.json'),
+                      app._points_payload(s))
+        layouts = [L for L in app._layouts_meta(s) if L['status'] == 'done']
+        size += write(os.path.join(out, 'sets', str(s), 'layouts.json'), layouts)
+        for L in layouts:
+            size += write(os.path.join(out, 'sets', str(s), 'layouts', f"{L['id']}.json"),
+                          app._layout_payload(s, L['id']))
+    for run_id in sorted(app._files):
+        size += write(os.path.join(out, 'run', f'{run_id}.json'),
+                      shrink_run(app._run_payload(run_id)))
+    size += write(os.path.join(out, 'saves.json'), {'dir': 'this site', 'saves': saves})
+    for file, got in loads.items():
+        size += write(os.path.join(out, 'saves', 'load', file), got)
+    print(f"{key}: {len(meta['sets'])} point sets, {len(app._files)} runs, "
+          f"{len(loads)} saved views, {size / 1e6:.0f} MB")
+    return size
 
 
 def main():
     if os.path.isdir(API):
         shutil.rmtree(API)
-    size = sum(export(ds, 8095 + i) for i, ds in enumerate(DATASETS))
+    size = sum(export(ds) for ds in DATASETS)
     size += write(os.path.join(API, 'datasets.json'),
                   {'datasets': [{'key': d['key'], 'label': d['label']} for d in DATASETS]})
     shutil.copy(os.path.join(HERE, 'umap_explorer.html'), os.path.join(DOCS, 'index.html'))

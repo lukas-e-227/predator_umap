@@ -1705,7 +1705,21 @@ async function loadRun(id) {
   const raw = await r.json();
   if (!r.ok) throw new Error(raw.error || r.statusText);
   const dims = raw.axes.length, T = raw.frames, B = raw.bodies;
-  const pos = decode(raw.pos, Float32Array), vel = decode(raw.vel, Float32Array);
+  let pos, vel;
+  if (raw.pos_u16) {
+    // the static site's compact run: 16-bit positions, and 8-bit heading angles in
+    // place of velocities (build_static.py, shrink_run). Only the heading is drawn,
+    // so a unit vector along it serves as the velocity
+    const q = decode(raw.pos_u16, Uint16Array), h = decode(raw.heading_u8, Uint8Array);
+    pos = new Float32Array(q.length); vel = new Float32Array(q.length);
+    for (let i = 0; i < q.length; i++) pos[i] = raw.pos_lo[i % dims] + q[i] * raw.pos_step[i % dims];
+    for (let i = 0; i < h.length; i++) {
+      const a = h[i] / 256 * 2 * Math.PI;
+      vel[i * dims] = Math.cos(a); vel[i * dims + dims - 1] = Math.sin(a);
+    }
+  } else {
+    pos = decode(raw.pos, Float32Array); vel = decode(raw.vel, Float32Array);
+  }
   const flee = decode(raw.flee, Uint8Array);
   const pred = B - 1;
   // per frame: distance to the nearest prey, which prey that is, and the school centre

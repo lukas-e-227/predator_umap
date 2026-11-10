@@ -471,12 +471,15 @@ class UmapExplorer:
 
     save_dir is where the page's saved views go, umap_explorer_saves in the current
     directory unless given.
+
+    serve=False starts no web server. The explorer's methods still work, which is
+    how build_static.py exports the static site.
     """
 
     def __init__(self, res, data, folder_path=None, port=8050, open_browser=True,
                  start_idx=None, file_prefix="simulation_positions", title=None,
                  cache_runs=24, feature_fn=None, feature_kwargs=None, save_dir=None,
-                 host='127.0.0.1', start_view=None, allow_delete=True):
+                 host='127.0.0.1', start_view=None, allow_delete=True, serve=True):
         self.data = data
         self.host, self.start_view, self.allow_delete = host, start_view, allow_delete
         self.save_dir = os.path.abspath(save_dir or os.path.join(os.getcwd(),
@@ -510,6 +513,10 @@ class UmapExplorer:
                        '_set': first}]
         self.res = res
 
+        # serve=False gives the explorer's data without a web server, for build_static.py
+        self._server, self.port = None, None
+        if not serve:
+            return
         if port in _RUNNING:
             _RUNNING.pop(port).stop()
         _stop_stale_servers(port)

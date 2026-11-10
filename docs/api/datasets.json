@@ -1,1 +1,1 @@
-{"datasets": [{"key": "prey1", "label": "optimized prey"}, {"key": "mass", "label": "predator with mass"}]}
+{"datasets": [{"key": "mass", "label": "predator with mass"}, {"key": "prey1", "label": "optimized prey"}]}
